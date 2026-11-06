@@ -1,4 +1,4 @@
-type AppError = { tag: "app_error"; status: number; message: string };
+export type AppError = { tag: "app_error"; status: number; message: string };
 
 function appError(status: number, message: string): AppError {
   return { tag: "app_error", status, message };
@@ -12,4 +12,12 @@ export const Errors = {
   internal: (msg: string) => appError(500, msg),
 } as const;
 
-export type { AppError };
+export function isAppError(e: unknown): e is AppError {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as any).tag === "app_error" &&
+    typeof (e as any).status === "number" &&
+    typeof (e as any).message === "string"
+  );
+}

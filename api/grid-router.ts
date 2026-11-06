@@ -6,6 +6,14 @@ import { businesses, leads } from "../db/schema";
 import { AREA_LIST, CATEGORY_LIST, type AuditDetail } from "@contracts/grid";
 import { toScanResult, computeScores, lostRevenue, haversineKm } from "./lib/scoring";
 
+const AREA_CENTERS: Record<string, { lat: number; lng: number }> = {
+  "Nairobi CBD": { lat: -1.2864, lng: 36.8172 },
+  Westlands: { lat: -1.2635, lng: 36.8023 },
+  Kilimani: { lat: -1.292, lng: 36.787 },
+  Karen: { lat: -1.3192, lng: 36.7058 },
+  "Nakuru CBD": { lat: -0.3031, lng: 36.08 },
+};
+
 export const gridRouter = createRouter({
   // Areas + business counts for the scan console
   areas: publicQuery.query(async () => {
@@ -44,7 +52,7 @@ export const gridRouter = createRouter({
           ? 0
           : Math.round(
               all.reduce((s, b) => s + computeScores(b).visibility, 0) /
-                all.length
+                all.length,
             ),
     };
   }),
@@ -55,7 +63,7 @@ export const gridRouter = createRouter({
       z.object({
         area: z.string(),
         category: z.enum(CATEGORY_LIST).optional(),
-      })
+      }),
     )
     .query(async ({ input }) => {
       const db = getDb();
@@ -66,9 +74,9 @@ export const gridRouter = createRouter({
           input.category
             ? and(
                 eq(businesses.area, input.area),
-                eq(businesses.category, input.category)
+                eq(businesses.category, input.category),
               )
-            : eq(businesses.area, input.area)
+            : eq(businesses.area, input.area),
         );
       return rows
         .map(toScanResult)
@@ -95,8 +103,8 @@ export const gridRouter = createRouter({
         .where(
           and(
             eq(businesses.area, b.area),
-            eq(businesses.category, b.category)
-          )
+            eq(businesses.category, b.category),
+          ),
         );
       const competitors = peers
         .filter((p) => p.id !== b.id)
@@ -118,7 +126,7 @@ export const gridRouter = createRouter({
           .select()
           .from(leads)
           .where(
-            and(eq(leads.userId, ctx.user.id), eq(leads.businessId, b.id))
+            and(eq(leads.userId, ctx.user.id), eq(leads.businessId, b.id)),
           )
           .limit(1);
         if (mine[0]) {
@@ -146,11 +154,3 @@ export const gridRouter = createRouter({
       } satisfies AuditDetail;
     }),
 });
-
-const AREA_CENTERS: Record<string, { lat: number; lng: number }> = {
-  "Nairobi CBD": { lat: -1.2864, lng: 36.8172 },
-  Westlands: { lat: -1.2635, lng: 36.8023 },
-  Kilimani: { lat: -1.292, lng: 36.787 },
-  Karen: { lat: -1.3192, lng: 36.7058 },
-  "Nakuru CBD": { lat: -0.3031, lng: 36.08 },
-};

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
@@ -64,39 +64,59 @@ export const leadsRouter = createRouter({
         .limit(1);
       if (!biz[0]) throw new TRPCError({ code: "NOT_FOUND" });
 
-      const already = await db
-        .select()
-        .from(leads)
-        .where(
-          and(eq(leads.userId, ctx.user.id), eq(leads.businessId, input.businessId))
-        )
-        .limit(1);
-      if (already[0]) return { leadId: already[0].id, alreadyUnlocked: true };
+      // Ensure the wallet + free-credit bonus exist BEFORE the transaction, so
+      // a rolled-back unlock doesn't leave an orphan wallet or lose the bonus.
+      await ensureWallet(ctx.user.id);
 
-      const wallet = await ensureWallet(ctx.user.id);
-      if (wallet.credits < 1) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "INSUFFICIENT_CREDITS",
+      return await db.transaction(async (tx) => {
+        const already = await tx
+          .select()
+          .from(leads)
+          .where(
+            and(
+              eq(leads.userId, ctx.user.id),
+              eq(leads.businessId, input.businessId),
+            ),
+          )
+          .limit(1);
+        if (already[0]) {
+          return { leadId: already[0].id, alreadyUnlocked: true };
+        }
+
+        // Atomic decrement with balance check in the WHERE clause. `gte` in the
+        // predicate means the UPDATE matches 0 rows when the balance is 0 —
+        // no window between "check" and "update" for a concurrent unlock to
+        // slip through.
+        const decResult = await tx
+          .update(wallets)
+          .set({ credits: sql`${wallets.credits} - 1` })
+          .where(
+            and(eq(wallets.userId, ctx.user.id), gte(wallets.credits, 1)),
+          );
+
+        const affected =
+          (decResult as unknown as { affectedRows?: number }[])[0]
+            ?.affectedRows ?? 0;
+        if (affected === 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "INSUFFICIENT_CREDITS",
+          });
+        }
+
+        await tx.insert(creditTxns).values({
+          userId: ctx.user.id,
+          kind: "unlock",
+          credits: -1,
+          amountKes: 0,
         });
-      }
 
-      await db
-        .update(wallets)
-        .set({ credits: wallet.credits - 1 })
-        .where(eq(wallets.userId, ctx.user.id));
-      await db.insert(creditTxns).values({
-        userId: ctx.user.id,
-        kind: "unlock",
-        credits: -1,
-        amountKes: 0,
+        const [{ id: leadId }] = await tx
+          .insert(leads)
+          .values({ userId: ctx.user.id, businessId: input.businessId })
+          .$returningId();
+        return { leadId, alreadyUnlocked: false };
       });
-      const inserted = await db.insert(leads).values({
-        userId: ctx.user.id,
-        businessId: input.businessId,
-      });
-      const leadId = Number(inserted[0].insertId);
-      return { leadId, alreadyUnlocked: false };
     }),
 
   setStatus: authedQuery
@@ -105,7 +125,7 @@ export const leadsRouter = createRouter({
         leadId: z.number().int().positive(),
         status: z.enum(LEAD_STATUS_LIST),
         notes: z.string().max(2000).optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
@@ -152,7 +172,7 @@ export const leadsRouter = createRouter({
         mobileOk: business.mobileOk,
         metaOk: business.metaOk,
         avgTicketKes: business.avgTicketKes,
-        competitors: [],
+        competitors: [], // TODO: hydrate from grid.audit's competitor query
         leadStatus: lead.status,
         leadId: lead.id,
       });

@@ -12,18 +12,53 @@ function optional(name: string, fallback: string = ""): string {
   return process.env[name] ?? fallback;
 }
 
+/**
+ * Apple .p8 private keys arrive in three shapes depending on where the env is
+ * stored: real newlines (raw .p8 contents), escaped "\n" sequences (single-line
+ * .env), or base64-encoded (Vercel / some secret managers). Normalize all three.
+ */
+function normalizeAppleKey(raw: string): string {
+  if (!raw) return "";
+  if (raw.includes("-----BEGIN")) {
+    // Already PEM. Just unescape literal "\n" if present.
+    return raw.replace(/\\n/g, "\n");
+  }
+  // Assume base64-encoded PEM.
+  try {
+    return Buffer.from(raw, "base64").toString("utf8");
+  } catch {
+    return raw;
+  }
+}
+
 export const env = {
-  appId: required("APP_ID"),
-  appSecret: required("APP_SECRET"),
+  // --- core ---
   isProduction: process.env.NODE_ENV === "production",
   databaseUrl: required("DATABASE_URL"),
-  
-  // Fallback URL prevents the 'Invalid URL' crash in development
-  kimiAuthUrl: optional("KIMI_AUTH_URL", "https://api.moonshot.cn"), 
-  kimiOpenUrl: required("KIMI_OPEN_URL"),
-  ownerUnionId: optional("OWNER_UNION_ID"),
-  
-  // GridScout additions
+  apiUrl: optional("API_URL", "http://localhost:3000"),
+  appUrl: optional("APP_URL", "http://localhost:5173"),
+
+  // --- session ---
+  jwtSecret: required("JWT_SECRET"),
+
+  // --- owner bootstrap ---
+  ownerEmail: optional("OWNER_EMAIL"),
+
+  // --- OAuth: Google ---
+  googleClientId: optional("GOOGLE_CLIENT_ID"),
+  googleClientSecret: optional("GOOGLE_CLIENT_SECRET"),
+
+  // --- OAuth: GitHub ---
+  githubClientId: optional("GITHUB_CLIENT_ID"),
+  githubClientSecret: optional("GITHUB_CLIENT_SECRET"),
+
+  // --- OAuth: Apple ---
+  appleClientId: optional("APPLE_CLIENT_ID"),
+  appleTeamId: optional("APPLE_TEAM_ID"),
+  appleKeyId: optional("APPLE_KEY_ID"),
+  applePrivateKey: normalizeAppleKey(optional("APPLE_PRIVATE_KEY")),
+
+  // --- GridScout additions ---
   googlePlacesApiKey: optional("GOOGLE_PLACES_API_KEY"),
   openAiApiKey: optional("OPENAI_API_KEY"),
 };

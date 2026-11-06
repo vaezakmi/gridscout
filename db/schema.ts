@@ -9,13 +9,18 @@ import {
   boolean,
   timestamp,
   bigint,
+  uniqueIndex,
 } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: serial("id").primaryKey(),
-  unionId: varchar("unionId", { length: 255 }).notNull().unique(),
+  email: varchar("email", { length: 320 }).notNull().unique(),
   name: varchar("name", { length: 255 }),
-  email: varchar("email", { length: 320 }),
+  passwordHash: varchar("passwordHash", { length: 255 }),
+  provider: mysqlEnum("provider", ["email", "google", "github", "apple"])
+    .notNull()
+    .default("email"),
+  providerId: varchar("providerId", { length: 255 }),
   avatar: text("avatar"),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -98,19 +103,28 @@ export const LEAD_STATUSES = [
   "lost",
 ] as const;
 
-export const leads = mysqlTable("leads", {
-  id: serial("id").primaryKey(),
-  userId: bigint("userId", { mode: "number", unsigned: true })
-    .notNull()
-    .references(() => users.id),
-  businessId: bigint("businessId", { mode: "number", unsigned: true })
-    .notNull()
-    .references(() => businesses.id),
-  status: mysqlEnum("status", LEAD_STATUSES).notNull().default("new"),
-  notes: text("notes"),
-  pitch: text("pitch"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+export const leads = mysqlTable(
+  "leads",
+  {
+    id: serial("id").primaryKey(),
+    userId: bigint("userId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => users.id),
+    businessId: bigint("businessId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => businesses.id),
+    status: mysqlEnum("status", LEAD_STATUSES).notNull().default("new"),
+    notes: text("notes"),
+    pitch: text("pitch"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => ({
+    userBusinessUnique: uniqueIndex("leads_user_business_idx").on(
+      table.userId,
+      table.businessId,
+    ),
+  }),
+);
 
 export type Lead = typeof leads.$inferSelect;
 

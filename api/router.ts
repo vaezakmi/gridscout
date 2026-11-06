@@ -10,11 +10,6 @@ export const appRouter = createRouter({
   grid: gridRouter,
   leads: leadsRouter,
   payments: paymentsRouter,
-
-  // TODO: add feature routers here, e.g.
-  // todo: createRouter({
-  //   list: publicQuery.query(() => findTodos()),
-  // }),
 });
 
 export type AppRouter = typeof appRouter;

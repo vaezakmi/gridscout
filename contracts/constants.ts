@@ -1,14 +1,20 @@
 export const Session = {
-  cookieName: "kimi_sid",
-  maxAgeMs: 365 * 24 * 60 * 60 * 1000,
+  cookieName: "session",
+  maxAgeMs: 7 * 24 * 60 * 60 * 1000, // 7 days
+} as const;
+
+export const OAuth = {
+  stateCookie: "oauth_state",
+  verifierCookie: "oauth_verifier",
+  stateMaxAgeMs: 10 * 60 * 1000, // 10 min
 } as const;
 
 export const ErrorMessages = {
-  unauthenticated: "Authentication required",
-  insufficientRole: "Insufficient permissions",
+  unauthenticated: "You must be signed in.",
+  insufficientRole: "You don't have permission to do that.",
 } as const;
 
 export const Paths = {
-  login: "/login",
+  /** @deprecated Replaced by /api/oauth/{provider}/callback in oauth-router.ts */
   oauthCallback: "/api/oauth/callback",
 } as const;

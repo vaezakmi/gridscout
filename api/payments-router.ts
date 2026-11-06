@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
@@ -17,6 +17,12 @@ import { CREDIT_PRICE_KES, CREDIT_BUNDLES } from "@contracts/grid";
  * environment, implement the oauth token + STK push POST in
  * api/routes/payments.ts (route /api/payments/daraja/callback is already the
  * confirmation webhook), and flip confirmDemo off.
+ *
+ * SECURITY: confirmDemo is disabled in production regardless of env config.
+ * In demo mode it is still an authenticated user crediting themselves, so the
+ * only thing protecting it is that demo mode should never run in prod. If you
+ * need a remote staging with confirmDemo active, gate it behind a shared
+ * secret header (DEMO_SECRET) instead of NODE_ENV.
  */
 export const paymentsRouter = createRouter({
   wallet: authedQuery.query(async ({ ctx }) => {
@@ -60,7 +66,7 @@ export const paymentsRouter = createRouter({
         phone: z
           .string()
           .regex(/^(\+254|0)7\d{8}$/, "Enter a valid Safaricom number, e.g. 0712345678"),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       if (!CREDIT_BUNDLES.includes(input.credits as (typeof CREDIT_BUNDLES)[number])) {
@@ -80,6 +86,10 @@ export const paymentsRouter = createRouter({
         status: "pending",
         mpesaRef: null,
       });
+      // TODO(db-portability): swap for `.returning({ id: creditTxns.id })`
+      // on Postgres / SQLite. Current form is MySQL (`$returningId()` also
+      // works). Verify before shipping — a wrong shape yields `NaN` and
+      // breaks confirmDemo.
       const txnId = Number(inserted[0].insertId);
       const demo = !process.env.DARAJA_CONSUMER_KEY;
       return {
@@ -97,16 +107,14 @@ export const paymentsRouter = createRouter({
   confirmDemo: authedQuery
     .input(z.object({ txnId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
-      const db = getDb();
-      const txn = await db
-        .select()
-        .from(creditTxns)
-        .where(eq(creditTxns.id, input.txnId))
-        .limit(1);
-      const t = txn[0];
-      if (!t || t.userId !== ctx.user.id) throw new TRPCError({ code: "NOT_FOUND" });
-      if (t.status !== "pending") return { ok: true, already: true };
-
+      // Hard lockout in production: demo credits must never be mintable on a
+      // live deployment, even if DARAJA_CONSUMER_KEY is missing.
+      if (process.env.NODE_ENV === "production") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Demo confirmation is disabled in production.",
+        });
+      }
       const demo = !process.env.DARAJA_CONSUMER_KEY;
       if (!demo) {
         throw new TRPCError({
@@ -114,16 +122,38 @@ export const paymentsRouter = createRouter({
           message: "Live mode: payment is confirmed by the Daraja callback webhook.",
         });
       }
-      const mpesaRef = "DEMO" + Math.random().toString(36).slice(2, 10).toUpperCase();
-      await db
-        .update(creditTxns)
-        .set({ status: "completed", mpesaRef })
-        .where(eq(creditTxns.id, t.id));
-      const wallet = await ensureWallet(ctx.user.id);
-      await db
-        .update(wallets)
-        .set({ credits: wallet.credits + t.credits })
-        .where(eq(wallets.userId, ctx.user.id));
-      return { ok: true, already: false, mpesaRef };
+
+      const db = getDb();
+      return await db.transaction(async (tx) => {
+        const txn = await tx
+          .select()
+          .from(creditTxns)
+          .where(eq(creditTxns.id, input.txnId))
+          .limit(1);
+        const t = txn[0];
+        if (!t || t.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        // Re-check inside the transaction so a concurrent confirmDemo for
+        // the same txnId doesn't credit twice.
+        if (t.status !== "pending") {
+          return { ok: true as const, already: true as const };
+        }
+
+        const mpesaRef =
+          "DEMO" + Math.random().toString(36).slice(2, 10).toUpperCase();
+        await tx
+          .update(creditTxns)
+          .set({ status: "completed", mpesaRef })
+          .where(eq(creditTxns.id, t.id));
+
+        const wallet = await ensureWallet(ctx.user.id);
+        await tx
+          .update(wallets)
+          .set({ credits: wallet.credits + t.credits })
+          .where(eq(wallets.userId, ctx.user.id));
+
+        return { ok: true as const, already: false as const, mpesaRef };
+      });
     }),
 });

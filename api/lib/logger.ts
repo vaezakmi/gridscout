@@ -1,4 +1,4 @@
-// Structured logger for the backend, mirrored to /tmp/kimi-logs/app.log.
+// Structured logger for the backend, mirrored to /tmp/gridscout-logs/app.log.
 //
 // Why a file at all: the sandbox-local log is what the building agent reads to
 // debug a preview that will not start or a request that 500s. stdout is
@@ -27,8 +27,9 @@ import { scrubCtx, scrubValue } from "./scrub";
 // turning a logging feature into a new outage class. Hence an explicit byte
 // budget below: past it the file is truncated once, with a marker, so the newest
 // evidence survives and the total stays bounded.
-const LOG_DIR = process.env.KIMI_LOG_DIR ?? "/tmp/kimi-logs";
-const LOG_FILE = process.env.KIMI_LOG_FILE ?? path.join(LOG_DIR, "app.log");
+const LOG_DIR = process.env.GRIDSCOUT_LOG_DIR ?? "/tmp/gridscout-logs";
+const LOG_FILE =
+  process.env.GRIDSCOUT_LOG_FILE ?? path.join(LOG_DIR, "app.log");
 // 8 MiB is far more than a debugging session reads and small enough that even a
 // hostile write rate cannot exhaust a sandbox disk.
 const LOG_MAX_BYTES = 8 * 1024 * 1024;
@@ -50,22 +51,24 @@ function enforceBudget(lineLength: number): void {
     sizeKnown = true;
   }
   if (bytesWritten + lineLength <= LOG_MAX_BYTES) return;
+  // The marker is itself written into the file, so bytesWritten must reflect
+  // ITS size, not reset to 0 — otherwise the counter drifts by the marker
+  // length on every truncation and the budget is silently exceeded.
+  const marker =
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "warn",
+      msg: "app.log exceeded its size budget; truncated",
+      maxBytes: LOG_MAX_BYTES,
+    }) + "\n";
   try {
-    fs.writeFileSync(
-      LOG_FILE,
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        level: "warn",
-        msg: "app.log exceeded its size budget; truncated",
-        maxBytes: LOG_MAX_BYTES,
-      }) + "\n"
-    );
+    fs.writeFileSync(LOG_FILE, marker);
   } catch {
     // If we cannot truncate, keep appending: losing old lines is better than
     // losing the process's ability to log at all.
     return;
   }
-  bytesWritten = 0;
+  bytesWritten = marker.length;
 }
 
 let dirReady = false;
@@ -84,8 +87,17 @@ type Level = "debug" | "info" | "warn" | "error";
 // Reserved fields the caller must not be able to override from ctx — same gate
 // clientlog.ts applies to browser-supplied context. Without it, a ctx carrying
 // `level`/`msg`/`ts` would rewrite the line's own identity (and could relabel a
-// `warn` as `error`, or forge a timestamp).
-const RESERVED_KEYS = new Set(["ts", "level", "msg", "requestId"]);
+// `warn` as `error`, or forge a timestamp). `source` is also reserved: the
+// building skill keys off it to distinguish browser lines ("client") from
+// server lines (absent), so a server-side ctx.source = "client" would let a
+// poisoned object masquerade as a browser log.
+const RESERVED_KEYS = new Set([
+  "ts",
+  "level",
+  "msg",
+  "requestId",
+  "source",
+]);
 
 function write(level: Level, msg: string, ctx?: Record<string, unknown>): void {
   // Serialization is inside the try: a cyclic or BigInt-bearing ctx throws, and
@@ -98,7 +110,9 @@ function write(level: Level, msg: string, ctx?: Record<string, unknown>): void {
     // spread FIRST so an explicit ctx.requestId still wins.
     const requestId = currentRequestId();
     const extra = Object.fromEntries(
-      Object.entries(scrubCtx(ctx) ?? {}).filter(([k]) => !RESERVED_KEYS.has(k))
+      Object.entries(scrubCtx(ctx) ?? {}).filter(
+        ([k]) => !RESERVED_KEYS.has(k),
+      ),
     );
     line = JSON.stringify({
       ts: new Date().toISOString(),
@@ -161,7 +175,8 @@ export const log = {
   // debug exists so app code has a file-backed level below info. Without it the
   // natural fallback is console.debug, which the sandbox file sink never sees —
   // so "verbose logging in the app" would silently be invisible to the agent.
-  debug: (msg: string, ctx?: Record<string, unknown>) => write("debug", msg, ctx),
+  debug: (msg: string, ctx?: Record<string, unknown>) =>
+    write("debug", msg, ctx),
 };
 
 export const logFilePath = LOG_FILE;

@@ -1,3 +1,4 @@
+// api/index.ts
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { HttpBindings } from "@hono/node-server";
@@ -5,11 +6,10 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env } from "./lib/env";
-import { createOAuthCallbackHandler } from "./kimi/auth";
-import { Paths } from "@contracts/constants";
+import { oauthRouter } from "./oauth-router";
 import { log } from "./lib/logger";
 import { handleClientLog } from "./lib/clientlog";
-import { darajaRoutes } from "./routes/payments";
+import { darajaRoutes } from "./daraja-router";
 import { REQUEST_ID_HEADER, runWithRequestId } from "./lib/requestcontext";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
@@ -60,7 +60,11 @@ app.use("*", async (c, next) => {
 // bodyless request (DELETE/PATCH on the app's own REST routes) 500s at dispatch.
 // /api/log keeps its own 64KB caps in lib/clientlog.ts, so it needs no middleware.
 app.use("/api/trpc/*", bodyLimit({ maxSize: 50 * 1024 * 1024 }));
-app.get(Paths.oauthCallback, createOAuthCallbackHandler());
+
+// OAuth (Google / GitHub / Apple). Mounted as a sub-app so its GET + 302
+// redirects aren't swallowed by the tRPC POST handler below.
+app.route("/api/oauth", oauthRouter);
+
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({
     endpoint: "/api/trpc",
@@ -69,6 +73,7 @@ app.use("/api/trpc/*", async (c) => {
     createContext,
   });
 });
+
 // Browser-side log sink (see lib/clientlog.ts). Must be registered before the
 // /api/* 404 catch-all below. bodyLimit guards it too: lib/clientlog.ts caps the
 // body itself, but only AFTER Hono has read it into memory, and this route sits
@@ -83,7 +88,7 @@ app.route("/api/payments/daraja", darajaRoutes);
 
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
-// Unhandled request errors must reach /tmp/kimi-logs/app.log, not just stdout:
+// Unhandled request errors must reach /tmp/gridscout-logs/app.log, not just stdout:
 // that file is what the building agent reads when a preview 500s, and without
 // this the log looks clean while the request actually failed. Response stays a
 // generic 500 (no stack leaked to the caller); the detail goes to the log only.

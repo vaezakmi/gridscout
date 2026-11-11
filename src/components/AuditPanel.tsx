@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { trpc } from "@/providers/trpc";
 import {
   CATEGORY_META,
@@ -11,7 +11,7 @@ import {
   type LeadStatus,
 } from "@contracts/grid";
 import { fmtKes, scoreColor } from "@/lib/format";
-import { FREE_GAPS, buildQuoteText, fulfilmentLink } from "@/lib/opportunity";
+import { FREE_GAPS, buildQuoteText } from "@/lib/opportunity";
 import { ScoreRing } from "./ScoreRing";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -109,16 +109,23 @@ function FixPlan({
   onCopyQuote: () => void;
   onUnlockClick: () => void;
 }) {
+  const [requestNote, setRequestNote] = useState("");
+  const requestNoteId = useId();
+  const utils = trpc.useUtils();
+
+  const requestFix = trpc.fixes.request.useMutation({
+    onSuccess: () => {
+      setRequestNote("");
+      void utils.fixes.mine.invalidate();
+    },
+  });
+
   const total = fixPlanTotalKes(plan);
   const quote = buildQuoteText(
     { name: audit.name, visibility: audit.scores.visibility, lostRevenueKes: audit.lostRevenueKes },
     plan,
   );
   const ownerHref = `https://wa.me/${audit.phone.replace(/\D/g, "")}?text=${encodeURIComponent(quote)}`;
-  const desk = fulfilmentLink(
-    { name: audit.name, area: audit.area, phone: audit.phone, lostRevenueKes: audit.lostRevenueKes },
-    plan,
-  );
   const monthsOfLeak = audit.lostRevenueKes > 0 ? total / audit.lostRevenueKes : null;
 
   return (
@@ -206,14 +213,57 @@ function FixPlan({
             <p className="mt-1 font-mono text-[10px] leading-relaxed text-muted-foreground">
               Can’t deliver the fixes yourself? GridScout’s team does the work. You keep the client and the margin.
             </p>
-            <a
-              href={desk}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="mt-2 inline-block bg-scout-orange px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-white transition-transform hover:scale-[1.03]"
-            >
-              Have GridScout fix it
-            </a>
+            <div className="mt-3 space-y-2">
+  <label
+    htmlFor={requestNoteId}
+    className="block font-mono text-[9px] uppercase tracking-widest text-muted-foreground"
+  >
+    Additional instructions (optional)
+  </label>
+
+  <textarea
+    id={requestNoteId}
+    value={requestNote}
+    onChange={(event) => setRequestNote(event.target.value)}
+    maxLength={500}
+    rows={2}
+    placeholder="Tell us about the work or client requirements..."
+    className="w-full resize-y border border-border bg-secondary/40 p-2 font-mono text-[10px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
+  />
+
+  <button
+    type="button"
+    disabled={audit.leadId === null || requestFix.isPending || plan.length === 0}
+    onClick={() => {
+      if (audit.leadId === null) return;
+
+      requestFix.mutate({
+        leadId: audit.leadId,
+        packages: plan,
+        note: requestNote.trim() || undefined,
+      });
+    }}
+    className="w-full cursor-pointer bg-scout-orange px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-wider text-white disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    {requestFix.isPending ? "Submitting request..." : "Request GridScout fulfilment"}
+  </button>
+
+  {requestFix.isSuccess && (
+    <p role="status" className="font-mono text-[10px] text-scout-mint">
+      Request submitted. GridScout will review the work and prepare a quote.
+    </p>
+  )}
+
+  {requestFix.isError && (
+    <p role="alert" className="font-mono text-[10px] text-scout-red">
+      Request failed: {requestFix.error.message}
+    </p>
+  )}
+
+  <p className="font-mono text-[9px] leading-relaxed text-muted-foreground/70">
+    No credits are deducted when you submit a request. Work begins only after you review and accept the quote.
+  </p>
+</div>
           </div>
         </>
       )}

@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import Leads from './pages/Leads'
 import Login from "./pages/Login"
 import NotFound from "./pages/NotFound"
+import AdminFixes from "./pages/AdminFixes"
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
       <Route path="/" element={<Home />} />
       <Route path="/app" element={<Dashboard />} />
       <Route path="/leads" element={<Leads />} />
+      <Route path="/admin/fixes" element={<AdminFixes />} />
       <Route path="/login" element={<Login />} />
       <Route path="*" element={<NotFound />} />
     </Routes>

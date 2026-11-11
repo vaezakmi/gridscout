@@ -10,12 +10,13 @@ import {
   type LeadStatus,
   type Tone,
 } from "@contracts/grid";
+import { FIX_REQUEST_STATUS_META } from "@contracts/fixes";
 import { ConsoleHeader } from "@/components/ConsoleHeader";
 import { StkModal } from "@/components/StkModal";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { fmtCompactKes, fmtKes, scoreColor } from "@/lib/format";
-import { bandPlan, buildQuoteText, fixValueKes, fulfilmentLink } from "@/lib/opportunity";
+import { bandPlan, buildQuoteText, fixValueKes } from "@/lib/opportunity";
 
 const TONE_COLOR: Record<Tone, string> = {
   red: "hsl(var(--scout-red))",
@@ -65,6 +66,19 @@ export default function Leads() {
 
   const { data: leads, isLoading, isError, refetch } = trpc.leads.list.useQuery();
   const utils = trpc.useUtils();
+  const {
+    data: fixRequests,
+    isLoading: fixRequestsLoading,
+    isError: fixRequestsError,
+  } = trpc.fixes.mine.useQuery();
+
+  const acceptQuote = trpc.fixes.acceptQuote.useMutation({
+    onSuccess: () => utils.fixes.mine.invalidate(),
+  });
+
+  const declineQuote = trpc.fixes.declineQuote.useMutation({
+    onSuccess: () => utils.fixes.mine.invalidate(),
+  });
   const setStatus = trpc.leads.setStatus.useMutation({
     onSuccess: () => utils.leads.list.invalidate(),
   });
@@ -136,6 +150,137 @@ export default function Leads() {
       <ConsoleHeader onBuyCredits={() => !isAdmin && setCheckoutOpen(true)} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+        <section className="mb-8 border border-border bg-card/40 p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="tech-label tech-label--live mb-2">Agency jobs</div>
+              <h2 className="font-display text-xl font-bold uppercase tracking-tight">
+                My service <span className="text-primary">requests</span>
+              </h2>
+            </div>
+            <Link
+              to="/app"
+              className="border border-primary/40 bg-primary/10 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-primary hover:bg-primary/20"
+            >
+              Open audit console
+            </Link>
+          </div>
+
+          {fixRequestsLoading ? (
+            <p className="font-mono text-xs text-muted-foreground">Loading service requests...</p>
+          ) : fixRequestsError ? (
+            <p className="font-mono text-xs text-scout-red">
+              Could not load service requests. Refresh the page and try again.
+            </p>
+          ) : !fixRequests?.length ? (
+            <div className="border border-dashed border-border p-5 text-center">
+              <p className="font-mono text-xs text-muted-foreground">
+                No service requests yet. Open a lead audit in the Console to submit an exact fix plan.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {fixRequests.map((request) => {
+                const statusMeta = FIX_REQUEST_STATUS_META[request.status];
+
+                return (
+                  <article
+                    key={request.id}
+                    className="border border-border bg-background/60 p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-display text-sm font-bold uppercase">
+                          {request.business.name}
+                        </h3>
+                        <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                          {request.business.area} · Request #{request.id} · {timeAgo(request.createdAt)}
+                        </p>
+                      </div>
+                      <span
+                        className="border px-2 py-1 font-mono text-[10px] uppercase tracking-wider"
+                        style={{
+                          color: TONE_COLOR[statusMeta.tone],
+                          borderColor: TONE_COLOR[statusMeta.tone],
+                        }}
+                      >
+                        {statusMeta.label}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {request.packages.map((packageId) => {
+                        const packageMeta =
+                          FIX_PACKAGE_META[packageId as keyof typeof FIX_PACKAGE_META];
+
+                        return (
+                          <span
+                            key={packageId}
+                            className="border border-border px-2 py-1 font-mono text-[10px] text-muted-foreground"
+                          >
+                            {packageMeta?.label ?? packageId}
+                          </span>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs">
+                      <span className="text-muted-foreground">
+                        Initial estimate: <strong className="text-foreground">{fmtKes(request.totalKes)}</strong>
+                      </span>
+                      {request.quotedKes !== null && (
+                        <span className="text-muted-foreground">
+                          GridScout quote: <strong className="text-primary">{fmtKes(request.quotedKes)}</strong>
+                        </span>
+                      )}
+                    </div>
+
+                    {request.note && (
+                      <p className="mt-3 border-l-2 border-border pl-3 font-mono text-[11px] text-muted-foreground">
+                        Your note: {request.note}
+                      </p>
+                    )}
+
+                    {request.status === "quoted" && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          disabled={acceptQuote.isPending || declineQuote.isPending}
+                          onClick={() => acceptQuote.mutate({ requestId: request.id })}
+                          className="font-mono text-[10px] uppercase tracking-wider"
+                        >
+                          {acceptQuote.isPending ? "Processing..." : "Accept quote"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={acceptQuote.isPending || declineQuote.isPending}
+                          onClick={() => {
+                            if (window.confirm("Decline this GridScout quote?")) {
+                              declineQuote.mutate({ requestId: request.id });
+                            }
+                          }}
+                          className="font-mono text-[10px] uppercase tracking-wider"
+                        >
+                          {declineQuote.isPending ? "Processing..." : "Decline quote"}
+                        </Button>
+                      </div>
+                    )}
+
+                    {(
+                      (acceptQuote.isError && acceptQuote.variables?.requestId === request.id) ||
+                      (declineQuote.isError && declineQuote.variables?.requestId === request.id)
+                    ) && (
+                      <p className="mt-2 font-mono text-[10px] text-scout-red">
+                        The quote decision could not be saved. Refresh and try again.
+                      </p>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="tech-label tech-label--live mb-3">Agency pipeline</div>
@@ -263,10 +408,6 @@ export default function Leads() {
               plan,
             );
             const ownerHref = `https://wa.me/${b.phone.replace(/\D/g, "")}?text=${encodeURIComponent(quote)}`;
-            const desk = fulfilmentLink(
-              { name: b.name, area: b.area, phone: b.phone, lostRevenueKes: b.lostRevenueKes },
-              plan,
-            );
 
             return (
               <div key={lead.id} className="border border-border bg-card">
@@ -365,14 +506,6 @@ export default function Leads() {
                               >
                                 {copiedQuoteId === lead.id ? "Copied ✓" : "Copy quote"}
                               </button>
-                              <a
-                                href={desk}
-                                target="_blank"
-                                rel="noreferrer noopener"
-                                className="bg-scout-orange px-3 py-1.5 font-bold text-white transition-transform hover:scale-[1.03]"
-                              >
-                                Have GridScout fix it
-                              </a>
                             </div>
                             <p className="mt-2 font-mono text-[9px] normal-case tracking-wide text-muted-foreground/70">
                               Estimated from the visibility band. Open the audit in the console for the exact plan.

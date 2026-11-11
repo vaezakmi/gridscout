@@ -2,6 +2,7 @@ import { authRouter } from "./auth-router";
 import { gridRouter } from "./grid-router";
 import { leadsRouter } from "./leads-router";
 import { paymentsRouter } from "./payments-router";
+import { fixesRouter } from "./fixes-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -10,6 +11,7 @@ export const appRouter = createRouter({
   grid: gridRouter,
   leads: leadsRouter,
   payments: paymentsRouter,
+  fixes: fixesRouter,
 });
 
 export type AppRouter = typeof appRouter;

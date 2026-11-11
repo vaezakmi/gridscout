@@ -18,7 +18,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@contracts/*": ["./contracts/*"],
-      "@db/*": ["./db/*"]
+      "@db/*": ["./db/*"],
+      "@api/*": ["./api/*"]
     }
   },
   "include": ["api", "contracts", "db"]

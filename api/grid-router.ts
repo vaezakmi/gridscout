@@ -1,59 +1,62 @@
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { businesses, leads } from "../db/schema";
-import { AREA_LIST, CATEGORY_LIST, type AuditDetail } from "@contracts/grid";
+import {
+  AREA_LIST,
+  AREA_META,
+  CATEGORY_LIST,
+  SCAN_MAX_RESULTS,
+  SCORE_BANDS,
+  type AreaSummary,
+  type AuditDetail,
+} from "@contracts/grid";
 import { toScanResult, computeScores, lostRevenue, haversineKm } from "./lib/scoring";
-
-const AREA_CENTERS: Record<string, { lat: number; lng: number }> = {
-  "Nairobi CBD": { lat: -1.2864, lng: 36.8172 },
-  Westlands: { lat: -1.2635, lng: 36.8023 },
-  Kilimani: { lat: -1.292, lng: 36.787 },
-  Karen: { lat: -1.3192, lng: 36.7058 },
-  "Nakuru CBD": { lat: -0.3031, lng: 36.08 },
-};
 
 export const gridRouter = createRouter({
   // Areas + business counts for the scan console
-  areas: publicQuery.query(async () => {
+  areas: publicQuery.query(async (): Promise<AreaSummary[]> => {
     const db = getDb();
-    const all = await db
-      .select({ area: businesses.area, id: businesses.id })
-      .from(businesses);
-    const counts = new Map<string, number>();
-    for (const row of all) {
-      counts.set(row.area, (counts.get(row.area) ?? 0) + 1);
-    }
-    return AREA_LIST.map((name) => ({
-      name,
-      businesses: counts.get(name) ?? 0,
-      center: AREA_CENTERS[name],
-    }));
+    const rows = await db
+      .select({ area: businesses.area, n: sql<number>`count(*)` })
+      .from(businesses)
+      .groupBy(businesses.area);
+    const counts = new Map(rows.map((r) => [r.area, Number(r.n)]));
+
+    return AREA_LIST.map((name) => {
+      const meta = AREA_META[name];
+      return {
+        name,
+        region: meta.region,
+        center: meta.center,
+        zoom: meta.zoom,
+        businesses: counts.get(name) ?? 0,
+      };
+    });
   }),
 
   // Headline stats for the landing ticker
   stats: publicQuery.query(async () => {
     const db = getDb();
     const all = await db.select().from(businesses);
+
     let invisible = 0;
     let totalLost = 0;
+    let visibilitySum = 0;
+
     for (const b of all) {
       const v = computeScores(b).visibility;
-      if (v < 40) invisible++;
+      visibilitySum += v;
+      if (v < SCORE_BANDS.invisibleBelow) invisible++;
       totalLost += lostRevenue(b, v);
     }
+
     return {
       businessesIndexed: all.length,
       invisibleCount: invisible,
       totalLostRevenueKes: totalLost,
-      avgVisibility:
-        all.length === 0
-          ? 0
-          : Math.round(
-              all.reduce((s, b) => s + computeScores(b).visibility, 0) /
-                all.length,
-            ),
+      avgVisibility: all.length === 0 ? 0 : Math.round(visibilitySum / all.length),
     };
   }),
 
@@ -61,7 +64,7 @@ export const gridRouter = createRouter({
   scan: publicQuery
     .input(
       z.object({
-        area: z.string(),
+        area: z.enum(AREA_LIST),
         category: z.enum(CATEGORY_LIST).optional(),
       }),
     )
@@ -78,9 +81,11 @@ export const gridRouter = createRouter({
               )
             : eq(businesses.area, input.area),
         );
+
       return rows
         .map(toScanResult)
-        .sort((a, b) => b.lostRevenueKes - a.lostRevenueKes);
+        .sort((a, b) => b.lostRevenueKes - a.lostRevenueKes)
+        .slice(0, SCAN_MAX_RESULTS);
     }),
 
   // Full audit for one business + competitor radius + viewer's lead status
@@ -106,13 +111,14 @@ export const gridRouter = createRouter({
             eq(businesses.category, b.category),
           ),
         );
+
       const competitors = peers
         .filter((p) => p.id !== b.id)
         .map((p) => ({
           id: p.id,
           name: p.name,
           visibilityScore: computeScores(p).visibility,
-          distanceKm: haversineKm(b.lat, b.lng, p.lat, p.lng),
+          distanceKm: Math.round(haversineKm(b.lat, b.lng, p.lat, p.lng) * 100) / 100,
           reviewCount: p.reviewCount,
           keywordRank: p.keywordRank,
         }))
@@ -121,24 +127,24 @@ export const gridRouter = createRouter({
 
       let leadStatus: AuditDetail["leadStatus"] = null;
       let leadId: number | null = null;
+      let pitch: string | null = null;
       if (ctx.user) {
         const mine = await db
           .select()
           .from(leads)
-          .where(
-            and(eq(leads.userId, ctx.user.id), eq(leads.businessId, b.id)),
-          )
+          .where(and(eq(leads.userId, ctx.user.id), eq(leads.businessId, b.id)))
           .limit(1);
         if (mine[0]) {
           leadStatus = mine[0].status;
           leadId = mine[0].id;
+          pitch = mine[0].pitch ?? null;
         }
       }
 
-      const scan = toScanResult(b);
       return {
-        ...scan,
+        ...toScanResult(b),
         phone: b.phone,
+        pitch,
         claimed: b.claimed,
         photos: b.photos,
         posts: b.posts,

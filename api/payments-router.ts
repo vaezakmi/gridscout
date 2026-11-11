@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, desc, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { createRouter, authedQuery } from "./middleware";
+import { createRouter, authedQuery, isAdmin } from "./middleware";
 import { getDb } from "./queries/connection";
 import { wallets, creditTxns } from "../db/schema";
 import { ensureWallet } from "./leads-router";
@@ -36,6 +36,9 @@ export const paymentsRouter = createRouter({
       .limit(20);
     return {
       credits: wallet.credits,
+      // Admins bypass the credit system entirely (see leads.unlock).
+      // The UI renders "∞" and suppresses the buy-credits flow when this is true.
+      unlimited: isAdmin(ctx.user),
       transactions: txns.map((t) => ({
         id: t.id,
         kind: t.kind,
@@ -120,6 +123,15 @@ export const paymentsRouter = createRouter({
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "Live mode: payment is confirmed by the Daraja callback webhook.",
+        });
+      }
+
+      // Admins never need credits; a purchase from an admin session is a
+      // mistake (or a shared browser) and would only bloat their txn log.
+      if (isAdmin(ctx.user)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Admins have unlimited credits; no purchase needed.",
         });
       }
 

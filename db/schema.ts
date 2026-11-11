@@ -10,7 +10,11 @@ import {
   timestamp,
   bigint,
   uniqueIndex,
+  json,
 } from "drizzle-orm/mysql-core";
+
+// Import the canonical lists directly from contracts — single source of truth
+import { AREA_LIST, CATEGORY_LIST, LEAD_STATUS_LIST } from "../contracts/grid";
 
 export const users = mysqlTable("users", {
   id: serial("id").primaryKey(),
@@ -36,27 +40,11 @@ export type InsertUser = typeof users.$inferInsert;
 
 // ---- GridScout domain tables ----
 
-export const AREAS = [
-  "Nairobi CBD",
-  "Westlands",
-  "Kilimani",
-  "Karen",
-  "Nakuru CBD",
-] as const;
-
-export const CATEGORIES = [
-  "dentist",
-  "plumber",
-  "lawyer",
-  "real_estate",
-  "restaurant",
-  "salon",
-] as const;
-
 export const businesses = mysqlTable("businesses", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
-  category: mysqlEnum("category", CATEGORIES).notNull(),
+  // References the 47-category list from contracts/grid.ts
+  category: mysqlEnum("category", CATEGORY_LIST).notNull(),
   area: varchar("area", { length: 64 }).notNull(),
   lat: double("lat").notNull(),
   lng: double("lng").notNull(),
@@ -70,12 +58,12 @@ export const businesses = mysqlTable("businesses", {
   posts: int("posts").notNull().default(0),
   respondsToReviews: boolean("respondsToReviews").notNull().default(false),
   // Web presence signals
-  keywordRank: int("keywordRank"), // position for money keyword, null = not in top 50
-  siteSpeed: double("siteSpeed"), // Lighthouse perf 0-100, null = no site
+  keywordRank: int("keywordRank"),
+  siteSpeed: double("siteSpeed"),
   mobileOk: boolean("mobileOk"),
   metaOk: boolean("metaOk"),
   // Market sizing
-  estSearches: int("estSearches").notNull().default(0), // monthly local searches
+  estSearches: int("estSearches").notNull().default(0),
   avgTicketKes: int("avgTicketKes").notNull().default(0),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -95,13 +83,9 @@ export const wallets = mysqlTable("wallets", {
 
 export type Wallet = typeof wallets.$inferSelect;
 
-export const LEAD_STATUSES = [
-  "new",
-  "contacted",
-  "replied",
-  "won",
-  "lost",
-] as const;
+// LEAD_STATUSES now aliases the contract list — kept exported for back-compat
+export const LEAD_STATUSES = LEAD_STATUS_LIST;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
 export const leads = mysqlTable(
   "leads",
@@ -113,17 +97,15 @@ export const leads = mysqlTable(
     businessId: bigint("businessId", { mode: "number", unsigned: true })
       .notNull()
       .references(() => businesses.id),
-    status: mysqlEnum("status", LEAD_STATUSES).notNull().default("new"),
+    status: mysqlEnum("status", LEAD_STATUS_LIST).notNull().default("new"),
     notes: text("notes"),
+    // Saved AI cold-pitch; surfaced in AuditDetail.pitch and LeadDto.pitch
     pitch: text("pitch"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
-  (table) => ({
-    userBusinessUnique: uniqueIndex("leads_user_business_idx").on(
-      table.userId,
-      table.businessId,
-    ),
-  }),
+  (table) => [
+    uniqueIndex("leads_user_business_idx").on(table.userId, table.businessId),
+  ],
 );
 
 export type Lead = typeof leads.$inferSelect;
@@ -133,8 +115,8 @@ export const creditTxns = mysqlTable("credit_txns", {
   userId: bigint("userId", { mode: "number", unsigned: true })
     .notNull()
     .references(() => users.id),
-  kind: mysqlEnum("kind", ["purchase", "unlock", "bonus"]).notNull(),
-  credits: int("credits").notNull(), // +credit purchase/bonus, -unlock spend
+  kind: mysqlEnum("kind", ["purchase", "unlock", "bonus", "fix_request", "refund"]).notNull(),
+  credits: int("credits").notNull(),
   amountKes: int("amountKes").notNull().default(0),
   status: mysqlEnum("status", ["pending", "completed", "failed"])
     .notNull()
@@ -144,3 +126,34 @@ export const creditTxns = mysqlTable("credit_txns", {
 });
 
 export type CreditTxn = typeof creditTxns.$inferSelect;
+
+// ---- Done-For-You Fix Requests ----
+
+export const FIX_REQUEST_STATUSES = [
+  "new",
+  "quoted",
+  "in_progress",
+  "delivered",
+  "declined",
+  "cancelled",
+] as const;
+
+export const fixRequests = mysqlTable("fix_requests", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => users.id),
+  leadId: bigint("leadId", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => leads.id),
+  status: mysqlEnum("status", FIX_REQUEST_STATUSES).notNull().default("new"),
+  packages: json("packages").$type<string[]>().notNull(),
+  totalKes: int("totalKes").notNull(),
+  feeCredits: int("feeCredits").notNull(),
+  quotedKes: int("quotedKes"),
+  note: text("note"),
+  adminNote: text("adminNote"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FixRequest = typeof fixRequests.$inferSelect;

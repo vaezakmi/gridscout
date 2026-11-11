@@ -11,11 +11,20 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Ticker } from "./Ticker";
 
+const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+  `px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors ${
+    isActive ? "bg-secondary text-primary" : "text-muted-foreground hover:text-foreground"
+  }`;
+
 export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
   const { user, logout } = useAuth();
   const { data: wallet } = trpc.payments.wallet.useQuery(undefined, {
     retry: false,
   });
+
+  const unlimited = wallet?.unlimited === true || user?.role === "admin";
+  const credits = wallet?.credits ?? 0;
+  const initials = (user?.name ?? user?.email ?? "GS").slice(0, 2).toUpperCase();
 
   return (
     <div className="sticky top-0 z-[600]">
@@ -33,43 +42,42 @@ export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
         </div>
 
         <nav className="ml-6 hidden items-center gap-1 lg:flex">
-          <NavLink
-            to="/app"
-            className={({ isActive }) =>
-              `px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors ${
-                isActive ? "bg-secondary text-primary" : "text-muted-foreground hover:text-foreground"
-              }`
-            }
-          >
+          <NavLink to="/app" className={navLinkClass}>
             Console
           </NavLink>
-          <NavLink
-            to="/leads"
-            className={({ isActive }) =>
-              `px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors ${
-                isActive ? "bg-secondary text-primary" : "text-muted-foreground hover:text-foreground"
-              }`
-            }
-          >
+          <NavLink to="/leads" className={navLinkClass}>
             Pipeline
           </NavLink>
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <button
-            onClick={onBuyCredits}
-            className="flex items-center gap-2 border border-primary/40 bg-primary/10 px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-primary transition-colors hover:bg-primary/20"
-          >
-            <span className="inline-block h-2 w-2 rotate-45 bg-primary" />
-            {wallet?.credits ?? 0} credits
-          </button>
+          {unlimited ? (
+            // Admins never get a buy affordance. This is a static badge — not a button,
+            // no hover, no cursor-pointer, no onClick. It confirms unlimited status
+            // without suggesting you can "top up".
+            <div
+              title="Admin account — credits are unlimited"
+              className="flex items-center gap-2 border border-scout-mint/40 bg-scout-mint/10 px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-scout-mint"
+            >
+              <span className="inline-block h-2 w-2 rotate-45 bg-scout-mint" />
+              ∞ credits · admin
+            </div>
+          ) : (
+            <button
+              onClick={onBuyCredits}
+              className="flex cursor-pointer items-center gap-2 border border-primary/40 bg-primary/10 px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-primary transition-colors hover:bg-primary/20"
+            >
+              <span className="inline-block h-2 w-2 rotate-45 bg-primary" />
+              {credits} credits
+            </button>
+          )}
 
           <DropdownMenu>
             <DropdownMenuTrigger className="cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary">
               <Avatar className="h-8 w-8 border border-border">
                 <AvatarImage src={user?.avatar ?? undefined} />
                 <AvatarFallback className="bg-secondary font-mono text-[10px] text-primary">
-                  {(user?.name ?? user?.email ?? "GS").slice(0, 2).toUpperCase()}
+                  {initials}
                 </AvatarFallback>
               </Avatar>
             </DropdownMenuTrigger>
@@ -77,6 +85,11 @@ export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
               <div className="hairline-b px-3 py-2 text-[10px] uppercase tracking-widest text-muted-foreground">
                 {user?.email ?? "operator"}
               </div>
+              {unlimited && (
+                <div className="px-3 pb-2 font-mono text-[10px] uppercase tracking-widest text-scout-mint">
+                  admin · unlimited credits
+                </div>
+              )}
               <DropdownMenuItem
                 onClick={logout}
                 className="cursor-pointer text-scout-red focus:bg-secondary focus:text-scout-red"

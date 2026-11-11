@@ -1,6 +1,7 @@
 import { ErrorMessages } from "@contracts/constants";
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
+import type { User } from "../db/schema";
 import type { TrpcContext } from "./context";
 import { log } from "./lib/logger";
 
@@ -43,7 +44,11 @@ const requireAuth = t.middleware(async (opts) => {
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
 
-function requireRole(role: string) {
+// Role is typed off the DB enum, so `requireRole("admni")` is a compile error
+// instead of a guard that silently never matches.
+type Role = User["role"];
+
+function requireRole(role: Role) {
   return t.middleware(async (opts) => {
     const { ctx, next } = opts;
 
@@ -57,6 +62,11 @@ function requireRole(role: string) {
     return next({ ctx: { ...ctx, user: ctx.user } });
   });
 }
+
+// Convenience: the admin bypass used by `leads.unlock` and `payments.wallet`
+// can just read `ctx.user.role === "admin"`, but exporting this keeps the
+// check in one place if it grows.
+export const isAdmin = (user: TrpcContext["user"]) => user?.role === "admin";
 
 export const authedQuery = t.procedure.use(requireAuth);
 export const adminQuery = authedQuery.use(requireRole("admin"));

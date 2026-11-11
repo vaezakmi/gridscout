@@ -23,17 +23,28 @@ export async function createContext(
   return ctx;
 }
 
+// The session JWT carries only `sub` + `email`; everything else (notably `role`)
+// is loaded fresh from the DB per request. That means a `users.role` change takes
+// effect on the very next request — no re-login required — as long as we keep
+// reading the user row here rather than trusting claims baked into the token.
+type SessionPayload = { sub: string; email: string };
+
 async function authenticateRequest(headers: Headers): Promise<User | undefined> {
   const raw = headers.get("cookie");
   if (!raw) return undefined;
   const token = parseCookie(raw)[Session.cookieName];
   if (!token) return undefined;
-  let payload: { sub: string; email: string };
+
+  let payload: SessionPayload;
   try {
-    payload = verifySessionToken(token);
+    payload = verifySessionToken(token) as SessionPayload;
   } catch {
     return undefined;
   }
-  const user = await db.users.findById(Number(payload.sub));
+
+  const userId = Number(payload.sub);
+  if (!Number.isFinite(userId)) return undefined;
+
+  const user = await db.users.findById(userId);
   return user ?? undefined;
 }

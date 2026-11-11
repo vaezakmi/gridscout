@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq, and, desc, sql, gte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { createRouter, authedQuery } from "./middleware";
+import { createRouter, authedQuery, isAdmin } from "./middleware";
 import { getDb } from "./queries/connection";
 import { businesses, leads, wallets, creditTxns } from "../db/schema";
 import { toScanResult } from "./lib/scoring";
@@ -52,7 +52,8 @@ export const leadsRouter = createRouter({
     }));
   }),
 
-  // Spend 1 credit -> unlock full contact details + AI pitch eligibility
+  // Spend 1 credit -> unlock full contact details + AI pitch eligibility.
+  // Admins bypass the credit system entirely: no check, no decrement, no txn row.
   unlock: authedQuery
     .input(z.object({ businessId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
@@ -64,9 +65,12 @@ export const leadsRouter = createRouter({
         .limit(1);
       if (!biz[0]) throw new TRPCError({ code: "NOT_FOUND" });
 
+      const admin = isAdmin(ctx.user);
+
       // Ensure the wallet + free-credit bonus exist BEFORE the transaction, so
       // a rolled-back unlock doesn't leave an orphan wallet or lose the bonus.
-      await ensureWallet(ctx.user.id);
+      // Admins skip this too — they don't need a wallet row to unlock.
+      if (!admin) await ensureWallet(ctx.user.id);
 
       return await db.transaction(async (tx) => {
         const already = await tx
@@ -83,33 +87,35 @@ export const leadsRouter = createRouter({
           return { leadId: already[0].id, alreadyUnlocked: true };
         }
 
-        // Atomic decrement with balance check in the WHERE clause. `gte` in the
-        // predicate means the UPDATE matches 0 rows when the balance is 0 —
-        // no window between "check" and "update" for a concurrent unlock to
-        // slip through.
-        const decResult = await tx
-          .update(wallets)
-          .set({ credits: sql`${wallets.credits} - 1` })
-          .where(
-            and(eq(wallets.userId, ctx.user.id), gte(wallets.credits, 1)),
-          );
+        if (!admin) {
+          // Atomic decrement with balance check in the WHERE clause. `gte` in the
+          // predicate means the UPDATE matches 0 rows when the balance is 0 —
+          // no window between "check" and "update" for a concurrent unlock to
+          // slip through.
+          const decResult = await tx
+            .update(wallets)
+            .set({ credits: sql`${wallets.credits} - 1` })
+            .where(
+              and(eq(wallets.userId, ctx.user.id), gte(wallets.credits, 1)),
+            );
 
-        const affected =
-          (decResult as unknown as { affectedRows?: number }[])[0]
-            ?.affectedRows ?? 0;
-        if (affected === 0) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "INSUFFICIENT_CREDITS",
+          const affected =
+            (decResult as unknown as { affectedRows?: number }[])[0]
+              ?.affectedRows ?? 0;
+          if (affected === 0) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "INSUFFICIENT_CREDITS",
+            });
+          }
+
+          await tx.insert(creditTxns).values({
+            userId: ctx.user.id,
+            kind: "unlock",
+            credits: -1,
+            amountKes: 0,
           });
         }
-
-        await tx.insert(creditTxns).values({
-          userId: ctx.user.id,
-          kind: "unlock",
-          credits: -1,
-          amountKes: 0,
-        });
 
         const [{ id: leadId }] = await tx
           .insert(leads)
@@ -160,6 +166,9 @@ export const leadsRouter = createRouter({
       const { lead, business } = row[0];
 
       const scan = toScanResult(business);
+      // The generatePitch() input is the audit-shaped payload minus fields
+      // that only exist post-pitch (`pitch`) or that the prompt doesn't need.
+      // Spreading `lead` would reintroduce userId/pitch; be explicit instead.
       const result = await generatePitch({
         ...scan,
         phone: business.phone,
@@ -183,6 +192,9 @@ export const leadsRouter = createRouter({
           .set({ pitch: result.pitch })
           .where(eq(leads.id, lead.id));
       }
+      // `result` is whatever `generatePitch` returns — the PitchResult contract
+      // (see server/ai/pitch.ts). AuditPanel reads `.pitch` only, so as long as
+      // that field is present the client is satisfied.
       return result;
     }),
 });

@@ -48,6 +48,11 @@ export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
           <NavLink to="/leads" className={navLinkClass}>
             Pipeline
           </NavLink>
+          {user?.role === "admin" && (
+            <NavLink to="/admin/fixes" className={navLinkClass}>
+              Service desk
+            </NavLink>
+          )}
         </nav>
 
         <div className="ml-auto flex items-center gap-3">

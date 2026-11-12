@@ -99,28 +99,24 @@ const FAQ = [
   ],
 ];
 
-function RoiCalculator({ to }: { to: string }) {
-  const [leads, setLeads] = useState(20);
-  const [close, setClose] = useState(10);
-  const [retainer, setRetainer] = useState(25000);
+type RoiSliderRowProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+  suffix?: string;
+};
 
-  const won = Math.round((leads * close) / 100);
-  const recurringRevenue = won * retainer;
-  const assumedFixPlanKes = fixValueKes(20);
-  const oneOffRevenue = won * assumedFixPlanKes;
-  const leadSpend = leads * CREDIT_PRICE_KES;
-  const fmt = (n: number) => n.toLocaleString("en-KE");
-
-  const Row = ({
-    label, value, min, max, step, onChange, suffix,
-  }: {
-    label: string; value: number; min: number; max: number; step: number;
-    onChange: (v: number) => void; suffix?: string;
-  }) => (
+function RoiSliderRow({
+  label, value, min, max, step, onChange, suffix,
+}: RoiSliderRowProps) {
+  return (
     <div>
       <div className="mb-2 flex justify-between gap-4 font-mono text-[10px] uppercase tracking-widest">
         <span className="text-muted-foreground">{label}</span>
-        <span className="text-foreground tabular-nums">{fmt(value)}{suffix}</span>
+        <span className="text-foreground tabular-nums">{value.toLocaleString("en-KE")}{suffix}</span>
       </div>
       <input
         type="range"
@@ -133,6 +129,18 @@ function RoiCalculator({ to }: { to: string }) {
       />
     </div>
   );
+}
+function RoiCalculator({ to }: { to: string }) {
+  const [leads, setLeads] = useState(20);
+  const [close, setClose] = useState(10);
+  const [retainer, setRetainer] = useState(25000);
+
+  const won = Math.round((leads * close) / 100);
+  const recurringRevenue = won * retainer;
+  const assumedFixPlanKes = fixValueKes(20);
+  const oneOffRevenue = won * assumedFixPlanKes;
+  const leadSpend = leads * CREDIT_PRICE_KES;
+  const fmt = (n: number) => n.toLocaleString("en-KE");
 
   return (
     <div className="grid gap-px border border-border bg-border lg:grid-cols-[0.85fr_1.15fr]">
@@ -143,9 +151,9 @@ function RoiCalculator({ to }: { to: string }) {
             Model a month of prospecting. Change the inputs to match your own sales process.
           </p>
         </div>
-        <Row label="Leads unlocked / month" value={leads} min={5} max={100} step={5} onChange={setLeads} />
-        <Row label="Close rate" value={close} min={2} max={30} step={1} onChange={setClose} suffix="%" />
-        <Row label="Monthly retainer per client (KES)" value={retainer} min={5000} max={100000} step={2500} onChange={setRetainer} />
+        <RoiSliderRow label="Leads unlocked / month" value={leads} min={5} max={100} step={5} onChange={setLeads} />
+        <RoiSliderRow label="Close rate" value={close} min={2} max={30} step={1} onChange={setClose} suffix="%" />
+        <RoiSliderRow label="Monthly retainer per client (KES)" value={retainer} min={5000} max={100000} step={2500} onChange={setRetainer} />
         <div className="border-t border-border pt-5">
           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Estimated lead spend at standard rate</div>
           <div className="mt-1 font-display text-2xl font-bold tabular-nums">KES {fmt(leadSpend)}</div>
@@ -237,7 +245,7 @@ export default function Home() {
           <div className="relative z-10">
             <div className="tech-label tech-label--live mb-7">
               <span className="led" />
-              Local commerce intelligence ? East Africa
+              Local commerce intelligence · East Africa
             </div>
 
             <h1 className="max-w-3xl font-display text-[clamp(2.8rem,6.4vw,5.8rem)] font-extrabold uppercase leading-[0.94] tracking-[-0.055em]">
@@ -263,7 +271,7 @@ export default function Home() {
                 to={cta}
                 className="inline-flex min-h-14 items-center justify-center bg-scout-orange px-7 py-4 font-mono text-xs font-bold uppercase tracking-[0.18em] text-white transition-transform hover:scale-[1.03] active:scale-[0.98]"
               >
-                Explore opportunities <span className="ml-3 text-base">?</span>
+                Explore opportunities <span className="ml-3 text-base">→</span>
               </Link>
               <a
                 href="#loop"
@@ -300,7 +308,7 @@ export default function Home() {
               </div>
             </div>
             <p className="mt-3 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/70">
-              Platform-wide estimates ? Updated from indexed data
+              Platform-wide estimates · Updated from indexed data
             </p>
           </div>
 
@@ -335,7 +343,7 @@ export default function Home() {
                     <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
                       Sample business
                     </span>
-                    <span className="font-mono text-[9px] text-scout-amber">WESTLANDS ? NAIROBI</span>
+                    <span className="font-mono text-[9px] text-scout-amber">WESTLANDS · NAIROBI</span>
                   </div>
 
                   <h2 className="mt-3 font-display text-xl font-bold uppercase tracking-tight">
@@ -359,9 +367,9 @@ export default function Home() {
                         Opportunity estimate
                       </div>
                       <div className="mt-2 font-display text-lg font-bold text-scout-amber">
-                        KES 95?140K
+                        KES 95–140K
                       </div>
-                      <div className="font-mono text-[9px] text-muted-foreground">per month ? illustrative</div>
+                      <div className="font-mono text-[9px] text-muted-foreground">per month · illustrative</div>
                     </div>
                   </div>
 
@@ -460,14 +468,14 @@ export default function Home() {
                     to={cta}
                     className="inline-flex items-center gap-2 border border-primary/40 px-4 py-3 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-primary transition-colors hover:bg-primary/10"
                   >
-                    Unlock opportunities <span>?</span>
+                    Unlock opportunities <span>→</span>
                   </Link>
                 </div>
               </div>
             </div>
 
             <p className="mt-3 text-center font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground/70">
-              Illustrative interface and estimates ? Not a live business audit or customer result
+              Illustrative interface and estimates · Not a live business audit or customer result
             </p>
           </div>
         </div>
@@ -652,7 +660,7 @@ export default function Home() {
           </div>
 
           <p className="mt-5 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            No recurring subscription ? One free credit for new accounts ? Transparent KES pricing
+            No recurring subscription · One free credit for new accounts · Transparent KES pricing
           </p>
         </div>
       </section>

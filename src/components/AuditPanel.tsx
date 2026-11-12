@@ -209,9 +209,9 @@ function FixPlan({
           </div>
 
           <div className="mt-3 border border-scout-orange/40 bg-scout-orange/5 p-3">
-            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-scout-orange">Done-for-you</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-scout-orange">Managed fulfilment</div>
             <p className="mt-1 font-mono text-[10px] leading-relaxed text-muted-foreground">
-              Can’t deliver the fixes yourself? GridScout’s team does the work. You keep the client and the margin.
+              Need help delivering these fixes? Submit a request for GridScout to review. We will assess the scope and send you a quote before any work begins.
             </p>
             <div className="mt-3 space-y-2">
   <label

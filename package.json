@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "vite",
         "build": "vite build && esbuild api/index.ts --platform=node --bundle --format=esm --outfile=dist/boot.js --banner:js=\"import { createRequire } from 'module';const require = createRequire(import.meta.url);\"",
-        "lint": "eslint .",
+        "lint": "eslint api contracts db src",
         "preview": "vite preview",
         "start": "node -e \"process.env.NODE_ENV='production'; import('./dist/boot.js')\"",
         "check": "tsc -b",

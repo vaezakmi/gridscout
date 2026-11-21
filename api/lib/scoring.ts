@@ -16,10 +16,10 @@ const clamp100 = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
  */
 export function computeScores(b: Business): ScoreBreakdown {
   const claimedPts = b.claimed ? 25 : 0;
-  const ratingPts = Math.round(((b.rating - 1) / 4) * 20);
-  const reviewPts = Math.min(20, Math.round(b.reviewCount / 9));
-  const photosPts = Math.min(10, Math.round(b.photos / 4));
-  const postsPts = Math.min(10, Math.round(b.posts / 1.2));
+  const ratingPts = Math.round((((b.rating ?? 0) - 1) / 4) * 20);
+  const reviewPts = Math.min(20, Math.round((b.reviewCount ?? 0) / 9));
+  const photosPts = Math.min(10, Math.round((b.photos ?? 0) / 4));
+  const postsPts = Math.min(10, Math.round((b.posts ?? 0) / 1.2));
   const respondsPts = b.respondsToReviews ? 15 : 0;
   const maps = clamp100(
     claimedPts + ratingPts + reviewPts + photosPts + postsPts + respondsPts
@@ -50,8 +50,8 @@ export function computeScores(b: Business): ScoreBreakdown {
 export function lostRevenue(b: Business, visibility: number): number {
   // best-in-class local capture is ~32% of category searches; visibility scales you toward it
   const captureShare = (visibility / 100) * 0.32;
-  const missedClicks = Math.max(0, b.estSearches * (0.32 - captureShare));
-  const raw = missedClicks * 0.07 * b.avgTicketKes; // 7% of searchers become customers
+  const missedClicks = Math.max(0, (b.estSearches ?? 0) * (0.32 - captureShare));
+  const raw = missedClicks * 0.07 * (b.avgTicketKes ?? 0); // 7% of searchers become customers
   return Math.round(raw / 100) * 100;
 }
 
@@ -70,8 +70,8 @@ export function buildIssues(b: Business): string[] {
     issues.push("Broken on mobile (72% of local searches)");
   if (b.website && b.metaOk === false)
     issues.push("Missing meta titles/descriptions");
-  if (b.reviewCount < 20) issues.push(`Only ${b.reviewCount} reviews`);
-  if (b.claimed && b.posts === 0) issues.push("Profile has zero posts");
+  if ((b.reviewCount ?? 0) < 20) issues.push(`Only ${(b.reviewCount ?? 0)} reviews`);
+  if (b.claimed && (b.posts ?? 0) === 0) issues.push("Profile has zero posts");
   if (b.claimed && !b.respondsToReviews)
     issues.push("Never responds to reviews");
   return issues;
@@ -86,12 +86,12 @@ export function toScanResult(b: Business): BusinessScanResult {
     area: b.area,
     lat: b.lat,
     lng: b.lng,
-    rating: b.rating,
-    reviewCount: b.reviewCount,
+    rating: (b.rating ?? 0),
+    reviewCount: (b.reviewCount ?? 0),
     website: b.website,
     scores,
     lostRevenueKes: lostRevenue(b, scores.visibility),
-    estSearches: b.estSearches,
+    estSearches: (b.estSearches ?? 0),
     issues: buildIssues(b),
   };
 }
@@ -112,3 +112,4 @@ export function haversineKm(
       Math.sin(dLng / 2) ** 2;
   return Math.round(R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)) * 10) / 10;
 }
+

@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import { eq, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
@@ -36,27 +36,68 @@ export const gridRouter = createRouter({
     });
   }),
 
-  // Headline stats for the landing ticker
+  // Headline stats for the landing ticker — genuine, assessed records only.
   stats: publicQuery.query(async () => {
     const db = getDb();
-    const all = await db.select().from(businesses);
+    const all = await db
+      .select()
+      .from(businesses)
+      .where(eq(businesses.isDemo, false));
+
+    const hasMapsAssessment = (b: (typeof all)[number]) =>
+      b.claimed !== null ||
+      b.rating !== null ||
+      b.reviewCount !== null ||
+      b.photos !== null ||
+      b.posts !== null ||
+      b.respondsToReviews !== null;
+
+    const hasWebAssessment = (b: (typeof all)[number]) =>
+      b.websiteStatus !== "unknown" ||
+      b.keywordRank !== null ||
+      b.siteSpeed !== null ||
+      b.mobileOk !== null ||
+      b.metaOk !== null;
+
+    const visibilityAssessed = all.filter(
+      (b) => hasMapsAssessment(b) && hasWebAssessment(b),
+    );
 
     let invisible = 0;
-    let totalLost = 0;
     let visibilitySum = 0;
+    let totalLost = 0;
+    let revenueAssessedCount = 0;
 
-    for (const b of all) {
-      const v = computeScores(b).visibility;
-      visibilitySum += v;
-      if (v < SCORE_BANDS.invisibleBelow) invisible++;
-      totalLost += lostRevenue(b, v);
+    for (const b of visibilityAssessed) {
+      const visibility = computeScores(b).visibility;
+      visibilitySum += visibility;
+
+      if (visibility < SCORE_BANDS.invisibleBelow) {
+        invisible++;
+      }
+
+      const hasRevenueInputs =
+        b.estSearches !== null &&
+        b.estSearches >= 0 &&
+        b.avgTicketKes !== null &&
+        b.avgTicketKes > 0;
+
+      if (hasRevenueInputs) {
+        totalLost += lostRevenue(b, visibility);
+        revenueAssessedCount++;
+      }
     }
 
     return {
       businessesIndexed: all.length,
+      visibilityAssessedCount: visibilityAssessed.length,
       invisibleCount: invisible,
+      revenueAssessedCount,
       totalLostRevenueKes: totalLost,
-      avgVisibility: all.length === 0 ? 0 : Math.round(visibilitySum / all.length),
+      avgVisibility:
+        visibilityAssessed.length === 0
+          ? 0
+          : Math.round(visibilitySum / visibilityAssessed.length),
     };
   }),
 
@@ -160,3 +201,5 @@ export const gridRouter = createRouter({
       } satisfies AuditDetail;
     }),
 });
+
+

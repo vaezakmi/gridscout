@@ -1,9 +1,4 @@
-# ─── Dependencies ──────────────────────────────────────────────
-node_modules
-node_modules/
-app/node_modules/
-
-# ─── Logs ──────────────────────────────────────────────────────
+# Logs
 logs
 *.log
 npm-debug.log*
@@ -12,40 +7,12 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# ─── Build outputs ─────────────────────────────────────────────
+node_modules
 dist
-dist/
 dist-ssr
-app/dist/
-app/dist-ssr/
-build/
-app/build/
-.vite/
-app/.vite/
-
-# ─── Environment variables ─────────────────────────────────────
-.env
-.env.local
-.env.*.local
-app/.env
-app/.env.local
-app/.env.*.local
 *.local
 
-# ─── Database ──────────────────────────────────────────────────
-*.db
-*.sqlite
-*.sqlite3
-db/migrations/*.sql
-
-# ─── TypeScript cache ──────────────────────────────────────────
-*.tsbuildinfo
-
-# ─── Test coverage ─────────────────────────────────────────────
-coverage/
-.nyc_output/
-
-# ─── Editor directories and files ──────────────────────────────
+# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -55,3 +22,20 @@ coverage/
 *.njsproj
 *.sln
 *.sw?
+# Environment variables
+.env
+.env.local
+.env.*.local
+# Database
+*.db
+*.sqlite
+*.sqlite3
+db/migrations/*.sql
+# TypeScript cache
+*.tsbuildinfo
+# Build outputs
+dist/
+build/
+# Test coverage
+coverage/
+.nyc_output/

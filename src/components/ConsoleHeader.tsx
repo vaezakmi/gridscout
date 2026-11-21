@@ -41,19 +41,26 @@ export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
           <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-scout-mint">Live grid</span>
         </div>
 
-        <nav className="ml-6 hidden items-center gap-1 lg:flex">
-          <NavLink to="/app" className={navLinkClass}>
-            Console
-          </NavLink>
-          <NavLink to="/leads" className={navLinkClass}>
-            Pipeline
-          </NavLink>
-          {user?.role === "admin" && (
-            <NavLink to="/admin/fixes" className={navLinkClass}>
-              Service desk
-            </NavLink>
-          )}
-        </nav>
+  <nav className="ml-6 hidden items-center gap-1 lg:flex">
+  <NavLink to="/app" className={navLinkClass}>
+    Console
+  </NavLink>
+  <NavLink to="/leads" className={navLinkClass}>
+    Pipeline
+  </NavLink>
+
+  {user?.role === "admin" && (
+    <>
+      <span className="mx-1 h-4 w-px bg-border" />
+      <NavLink to="/admin/fixes" className={navLinkClass}>
+        Service Desk
+      </NavLink>
+      <NavLink to="/admin/osm" className={navLinkClass}>
+        OSM Preview
+      </NavLink>
+    </>
+  )}
+</nav>
 
         <div className="ml-auto flex items-center gap-3">
           {unlimited ? (

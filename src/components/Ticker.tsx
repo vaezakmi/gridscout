@@ -10,9 +10,9 @@ export function Ticker() {
     ? [
         `${data.businessesIndexed} businesses indexed across Nairobi & Nakuru`,
         `${data.invisibleCount} currently invisible on local search`,
-        `${fmtCompactKes(data.totalLostRevenueKes)} estimated monthly opportunity across indexed businesses`,
+        `${fmtCompactKes(data.totalLostRevenueKes)} in monthly revenue leaking to competitors`,
         `average visibility score ${data.avgVisibility}/100`,
-        "Lead credits priced transparently in KES",
+        "M-Pesa STK checkout live — demo mode",
         "AI pitch engine online",
       ]
     : ["establishing uplink…"];

@@ -1,4 +1,4 @@
-﻿// contracts/grid.ts
+// contracts/grid.ts
 export type Range = readonly [min: number, max: number];
 
 export const REGION_META = {
@@ -185,12 +185,12 @@ export const FIX_PACKAGE_META = {
 export type FixPackageId = keyof typeof FIX_PACKAGE_META;
 
 export interface FixPlanInput {
-  claimed: boolean;
-  rating: number;
-  reviewCount: number;
-  respondsToReviews: boolean;
-  photos: number;
-  posts: number;
+  claimed: boolean | null;
+  rating: number | null;
+  reviewCount: number | null;
+  respondsToReviews: boolean | null;
+  photos: number | null;
+  posts: number | null;
   website: string | null;
   mobileOk: boolean | null;
   metaOk: boolean | null;
@@ -211,9 +211,9 @@ export function buildFixPlan(a: FixPlanInput): FixPackageId[] {
   ) {
     plan.push("site_tune_up");
   }
-  if (a.reviewCount < FIX_THRESHOLDS.minReviews || a.rating < FIX_THRESHOLDS.minRating) plan.push("review_drive");
+  if ((a.reviewCount ?? 0) < FIX_THRESHOLDS.minReviews || (a.rating ?? 0) < FIX_THRESHOLDS.minRating) plan.push("review_drive");
   if (!a.respondsToReviews) plan.push("review_replies");
-  if (a.photos < FIX_THRESHOLDS.minPhotos || a.posts === 0) plan.push("profile_content");
+  if ((a.photos ?? 0) < FIX_THRESHOLDS.minPhotos || a.posts === 0) plan.push("profile_content");
   return plan;
 }
 
@@ -248,12 +248,12 @@ export interface BusinessScanResult {
   area: string;
   lat: number;
   lng: number;
-  rating: number;
-  reviewCount: number;
+  rating: number | null;
+  reviewCount: number | null;
   website: string | null;
   scores: ScoreBreakdown;
   lostRevenueKes: number;
-  estSearches: number;
+  estSearches: number | null;
   issues: string[];
 }
 
@@ -262,22 +262,22 @@ export interface CompetitorInfo {
   name: string;
   visibilityScore: number;
   distanceKm: number;
-  reviewCount: number;
+  reviewCount: number | null;
   keywordRank: number | null;
 }
 
 export interface AuditDetail extends BusinessScanResult {
-  phone: string;
+  phone: string | null;
   pitch: string | null;
-  claimed: boolean;
-  photos: number;
-  posts: number;
-  respondsToReviews: boolean;
+  claimed: boolean | null;
+  photos: number | null;
+  posts: number | null;
+  respondsToReviews: boolean | null;
   keywordRank: number | null;
   siteSpeed: number | null;
   mobileOk: boolean | null;
   metaOk: boolean | null;
-  avgTicketKes: number;
+  avgTicketKes: number | null;
   competitors: CompetitorInfo[];
   leadStatus: LeadStatus | null;
   leadId: number | null;
@@ -313,3 +313,4 @@ export interface GatedAuditDetail extends AuditDetail {
   gapCount: number;
   fixPlan: FixPackageId[];
 }
+

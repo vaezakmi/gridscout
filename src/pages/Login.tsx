@@ -1,13 +1,80 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Eye, EyeOff, Loader2, AlertCircle, Check, ArrowRight, Sparkles, ShieldCheck, Zap } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertCircle,
+  Check,
+  ArrowRight,
+  ScanLine,
+  Target,
+  TrendingDown,
+} from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { RadarLogo } from "@/components/RadarLogo";
+import { fmtCompactKes } from "@/lib/format";
 
-const APP_NAME = "GridSCOUT";
+const APP_NAME = "GridScout";
+
+/* ------------------------------ Helpers -------------------------------- */
+
+type Mode = "signin" | "signup";
+type OAuthProvider = "google" | "github" | "apple";
+
+/** tRPC/zod errors often arrive as a JSON array string — turn them into something human. */
+function friendlyError(err: unknown): string {
+  const raw = (err as { message?: string })?.message;
+  if (!raw) return "Something went wrong. Please try again.";
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed[0]?.message) return parsed[0].message;
+  } catch {
+    /* not JSON, fall through */
+  }
+  return raw;
+}
+
+/** Only allow same-origin relative redirects (blocks open-redirect attacks). */
+function safeRedirect(target: string | null): string {
+  if (target && target.startsWith("/") && !target.startsWith("//")) return target;
+  return "/";
+}
+
+function scorePassword(pw: string) {
+  if (!pw) return { level: 0, label: "", bar: "bg-muted", text: "text-muted-foreground" };
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+  const level = score <= 1 ? 1 : score <= 2 ? 2 : score <= 4 ? 3 : 4;
+  const meta = [
+    { label: "", bar: "bg-muted", text: "text-muted-foreground" },
+    { label: "Weak", bar: "bg-scout-red", text: "text-scout-red" },
+    { label: "Fair", bar: "bg-scout-amber", text: "text-scout-amber" },
+    { label: "Good", bar: "bg-scout-mint/70", text: "text-scout-mint" },
+    { label: "Strong", bar: "bg-scout-mint", text: "text-scout-mint" },
+  ][level];
+  return { level, ...meta };
+}
+
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduced;
+}
 
 /* ----------------------------- Brand icons ----------------------------- */
 
@@ -38,90 +105,135 @@ function AppleIcon() {
   );
 }
 
-/* ------------------------------ Helpers -------------------------------- */
+/* ------------------------------ Brand panel ---------------------------- */
 
-type Mode = "signin" | "signup";
+const BOOT_LINES = [
+  "uplink established · sector grid online",
+  "sweeping westlands · 214 businesses indexed",
+  "visibility assessed · 3 invisible targets flagged",
+  "leak pricing computed · KES 95–140K / mo",
+  "fix plan drafted · quote ready for whatsapp",
+  "awaiting operator sign-in…",
+] as const;
 
-/** tRPC/zod errors often arrive as a JSON array string — turn them into something human. */
-function friendlyError(err: unknown): string {
-  const raw = (err as { message?: string })?.message;
-  if (!raw) return "Something went wrong. Please try again.";
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed[0]?.message) return parsed[0].message;
-  } catch {
-    /* not JSON, fall through */
-  }
-  return raw;
-}
+const FEATURES = [
+  { icon: ScanLine, title: "Sector scans", text: "Every business scored 0–100 on Maps and web presence." },
+  { icon: Target, title: "Fix plans & quotes", text: "Itemised packages and a WhatsApp-ready quote per lead." },
+  { icon: TrendingDown, title: "Revenue leak pricing", text: "Searches × missed capture × ticket size, in KES." },
+] as const;
 
-/** Only allow same-origin relative redirects (blocks open-redirect attacks). */
-function safeRedirect(target: string | null): string {
-  if (target && target.startsWith("/") && !target.startsWith("//")) return target;
-  return "/";
-}
+function BootLog() {
+  const reduced = usePrefersReducedMotion();
+  const [tick, setTick] = useState(0);
 
-function scorePassword(pw: string) {
-  let score = 0;
-  if (pw.length >= 8) score++;
-  if (pw.length >= 12) score++;
-  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
-  if (/\d/.test(pw)) score++;
-  if (/[^A-Za-z0-9]/.test(pw)) score++;
-  const level = Math.min(4, Math.max(pw.length ? 1 : 0, Math.ceil(score * 0.8)));
-  const labels = ["", "Weak", "Fair", "Good", "Strong"];
-  const colors = ["bg-muted", "bg-red-500", "bg-orange-500", "bg-yellow-500", "bg-emerald-500"];
-  return { level, label: labels[level], color: colors[level] };
-}
+  useEffect(() => {
+    if (reduced) {
+      setTick(BOOT_LINES.length);
+      return;
+    }
+    const id = setInterval(() => setTick((t) => (t + 1) % (BOOT_LINES.length + 3)), 1600);
+    return () => clearInterval(id);
+  }, [reduced]);
 
-/* ------------------------------ Components ----------------------------- */
-
-function BrandPanel() {
-  const features = [
-    { icon: Zap, title: "Lightning fast", text: "Get set up in seconds, not days." },
-    { icon: ShieldCheck, title: "Secure by default", text: "Your data is encrypted end to end." },
-    { icon: Sparkles, title: "Built to delight", text: "Every detail, obsessively polished." },
-  ];
+  const shown = BOOT_LINES.slice(0, Math.min(tick, BOOT_LINES.length));
 
   return (
-    <aside className="relative hidden overflow-hidden bg-zinc-950 text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
-      {/* Animated aurora */}
-      <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="login-orb absolute -left-24 -top-24 h-96 w-96 rounded-full bg-violet-600/40 blur-3xl" />
-        <div className="login-orb login-orb-delay absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-sky-500/30 blur-3xl" />
-        <div className="login-orb login-orb-delay-2 absolute left-1/3 top-1/2 h-72 w-72 rounded-full bg-fuchsia-500/20 blur-3xl" />
+    <div className="relative overflow-hidden rounded-lg border border-white/10 bg-black/40 p-4 font-mono text-[11px] leading-relaxed text-zinc-400">
+      <div className="mb-2 flex items-center justify-between text-[9px] uppercase tracking-[0.2em] text-zinc-600">
+        <span>gridscout · live feed</span>
+        <span className="flex items-center gap-1.5">
+          <span className="led" aria-hidden="true" />
+          online
+        </span>
+      </div>
+      {shown.map((line, i) => (
+        <p key={line} className="gs-rise">
+          <span className="text-primary">&gt;</span> {line}
+          {i === shown.length - 1 && (
+            <span className="gs-blink ml-1 inline-block h-3 w-1.5 translate-y-0.5 bg-primary" aria-hidden="true" />
+          )}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function BrandStats() {
+  const { data: stats } = trpc.grid.stats.useQuery();
+
+  return (
+    <div className="grid grid-cols-3 gap-4 border-t border-white/10 pt-5">
+      <div>
+        <div className="font-display text-2xl font-bold tabular-nums">
+          {stats?.businessesIndexed ?? "—"}
+        </div>
+        <div className="mt-1 font-mono text-[9px] uppercase leading-relaxed tracking-[0.14em] text-zinc-500">
+          Businesses indexed
+        </div>
+      </div>
+      <div>
+        <div className="font-display text-2xl font-bold tabular-nums text-scout-red">
+          {stats ? (stats.visibilityAssessedCount > 0 ? stats.invisibleCount : "—") : "—"}
+        </div>
+        <div className="mt-1 font-mono text-[9px] uppercase leading-relaxed tracking-[0.14em] text-zinc-500">
+          Invisible targets
+        </div>
+      </div>
+      <div>
+        <div className="font-display text-2xl font-bold tabular-nums text-scout-amber">
+          {stats ? (stats.revenueAssessedCount > 0 ? fmtCompactKes(stats.totalLostRevenueKes) : "—") : "—"}
+        </div>
+        <div className="mt-1 font-mono text-[9px] uppercase leading-relaxed tracking-[0.14em] text-zinc-500">
+          Est. gap / mo
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BrandPanel() {
+  return (
+    <aside className="relative hidden overflow-hidden bg-[#080f1b] text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
+      {/* Ambient field: orbs + grid + scanlines */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+        <div className="gs-orb absolute -left-24 -top-24 h-96 w-96 rounded-full bg-primary/25 blur-3xl" />
+        <div className="gs-orb gs-orb-delay absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-scout-orange/15 blur-3xl" />
+        <div className="gs-orb gs-orb-delay-2 absolute left-1/3 top-1/2 h-72 w-72 rounded-full bg-scout-mint/10 blur-3xl" />
         <div
-          className="absolute inset-0 opacity-[0.15]"
+          className="absolute inset-0 opacity-[0.18]"
           style={{
             backgroundImage:
-              "linear-gradient(to right, rgba(255,255,255,.4) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,.4) 1px, transparent 1px)",
-            backgroundSize: "48px 48px",
-            maskImage: "radial-gradient(ellipse at center, black 30%, transparent 75%)",
-            WebkitMaskImage: "radial-gradient(ellipse at center, black 30%, transparent 75%)",
+              "linear-gradient(hsl(var(--primary) / 0.35) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--primary) / 0.35) 1px, transparent 1px)",
+            backgroundSize: "44px 44px",
+            maskImage: "radial-gradient(ellipse at center, black 25%, transparent 75%)",
+            WebkitMaskImage: "radial-gradient(ellipse at center, black 25%, transparent 75%)",
           }}
         />
+        <div className="scanlines absolute inset-0" />
       </div>
 
       <div className="relative z-10 flex items-center gap-2 text-lg font-semibold tracking-tight">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-zinc-950">
-          <Sparkles className="h-4 w-4" />
-        </div>
-        {APP_NAME}
+        <RadarLogo size={26} />
+        <span className="font-display uppercase tracking-[0.26em]">
+          Grid<span className="text-primary">Scout</span>
+        </span>
       </div>
 
       <div className="relative z-10 max-w-md space-y-8">
         <h2 className="text-4xl font-semibold leading-tight tracking-tight">
-          Build something{" "}
-          <span className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-sky-300 bg-clip-text text-transparent">
-            legendary
+          Find the{" "}
+          <span className="bg-gradient-to-r from-primary to-scout-mint bg-clip-text text-transparent">
+            opportunity.
           </span>
-          .
+          <br />
+          Own the relationship.
         </h2>
+
         <ul className="space-y-5">
-          {features.map(({ icon: Icon, title, text }) => (
+          {FEATURES.map(({ icon: Icon, title, text }) => (
             <li key={title} className="flex gap-4">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 backdrop-blur">
-                <Icon className="h-5 w-5 text-violet-300" />
+                <Icon className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="font-medium">{title}</p>
@@ -130,38 +242,168 @@ function BrandPanel() {
             </li>
           ))}
         </ul>
+
+        <BootLog />
+        <BrandStats />
       </div>
 
       <p className="relative z-10 text-xs text-zinc-500">
-        © {new Date().getFullYear()} {APP_NAME}. All rights reserved.
+        © {new Date().getFullYear()} {APP_NAME} · Spatial SEO Intelligence
       </p>
     </aside>
   );
 }
 
+/* ------------------------------ Form pieces ---------------------------- */
+
 function ModeTabs({ mode, onChange, disabled }: { mode: Mode; onChange: (m: Mode) => void; disabled: boolean }) {
   return (
-    <div role="tablist" aria-label="Authentication mode" className="relative grid grid-cols-2 rounded-lg bg-muted p-1 text-sm font-medium">
+    <div
+      role="group"
+      aria-label="Authentication mode"
+      className="relative grid grid-cols-2 rounded-lg border border-border bg-secondary/50 p-1 text-sm font-medium"
+    >
       <div
-        aria-hidden
+        aria-hidden="true"
         className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-md bg-background shadow-sm transition-transform duration-300 ease-out"
         style={{ transform: mode === "signup" ? "translateX(100%)" : "translateX(0)" }}
       />
       {(["signin", "signup"] as const).map((m) => (
         <button
           key={m}
-          role="tab"
           type="button"
-          aria-selected={mode === m}
+          aria-pressed={mode === m}
           disabled={disabled}
           onClick={() => onChange(m)}
-          className={`relative z-10 rounded-md py-1.5 transition-colors ${
+          className={`relative z-10 cursor-pointer rounded-md py-1.5 transition-colors disabled:cursor-default ${
             mode === m ? "text-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {m === "signin" ? "Sign in" : "Sign up"}
         </button>
       ))}
+    </div>
+  );
+}
+
+function PasswordField({
+  value,
+  onChange,
+  show,
+  onToggleShow,
+  isSignup,
+  disabled,
+  onForgotPassword,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  show: boolean;
+  onToggleShow: () => void;
+  isSignup: boolean;
+  disabled: boolean;
+  onForgotPassword: () => void;
+}) {
+  const [capsLock, setCapsLock] = useState(false);
+  const strength = useMemo(() => scorePassword(value), [value]);
+
+  const trackCapsLock = (e: KeyboardEvent<HTMLInputElement>) =>
+    setCapsLock(e.getModifierState("CapsLock"));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label htmlFor="password">Password</Label>
+        {!isSignup && (
+          <button
+            type="button"
+            className="cursor-pointer text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            onClick={onForgotPassword}
+          >
+            Forgot password?
+          </button>
+        )}
+      </div>
+
+      <div className="relative">
+        <Input
+          id="password"
+          name="password"
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={trackCapsLock}
+          onKeyUp={trackCapsLock}
+          onBlur={() => setCapsLock(false)}
+          placeholder="••••••••"
+          autoComplete={isSignup ? "new-password" : "current-password"}
+          minLength={8}
+          required
+          disabled={disabled}
+          className="pr-10"
+          aria-describedby="password-help"
+        />
+        <button
+          type="button"
+          onClick={onToggleShow}
+          aria-label={show ? "Hide password" : "Show password"}
+          className="absolute right-2 top-1/2 cursor-pointer -translate-y-1/2 rounded p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+          disabled={disabled}
+        >
+          {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+
+      <div id="password-help" className="space-y-2">
+        {capsLock && (
+          <p className="flex items-center gap-1.5 text-xs text-scout-amber">
+            <AlertCircle className="h-3.5 w-3.5" /> Caps Lock is on
+          </p>
+        )}
+
+        {isSignup && (
+          <div className="space-y-1.5">
+            <div className="flex gap-1" aria-hidden="true">
+              {[1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className={`h-1 flex-1 rounded-full transition-colors duration-300 ${
+                    strength.level >= i ? strength.bar : "bg-muted"
+                  }`}
+                />
+              ))}
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                {value.length >= 8 && <Check className="h-3 w-3 text-scout-mint" />}
+                At least 8 characters
+              </span>
+              {strength.label && (
+                <span aria-live="polite" className={strength.text}>
+                  {strength.label}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OAuthButtons({ onProvider, disabled }: { onProvider: (p: OAuthProvider) => void; disabled: boolean }) {
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <Button variant="outline" type="button" className="gap-2" onClick={() => onProvider("google")} disabled={disabled}>
+          <GoogleIcon /> Google
+        </Button>
+        <Button variant="outline" type="button" className="gap-2" onClick={() => onProvider("github")} disabled={disabled}>
+          <GithubIcon /> GitHub
+        </Button>
+      </div>
+      <Button variant="outline" type="button" className="w-full gap-2" onClick={() => onProvider("apple")} disabled={disabled}>
+        <AppleIcon /> Continue with Apple
+      </Button>
     </div>
   );
 }
@@ -174,7 +416,6 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [capsLock, setCapsLock] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const navigate = useNavigate();
@@ -186,7 +427,6 @@ export default function Login() {
 
   const isSignup = mode === "signup";
   const isLoading = signinMutation.isPending || signupMutation.isPending;
-  const strength = useMemo(() => scorePassword(password), [password]);
 
   const switchMode = (next: Mode) => {
     setMode(next);
@@ -195,7 +435,7 @@ export default function Login() {
     setShowPassword(false);
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (isLoading) return;
     setError(null);
@@ -213,7 +453,7 @@ export default function Login() {
     }
   };
 
-  const oauth = (provider: "google" | "github" | "apple") => {
+  const oauth = (provider: OAuthProvider) => {
     const redirect = searchParams.get("redirect");
     const qs = redirect ? `?redirect=${encodeURIComponent(safeRedirect(redirect))}` : "";
     window.location.href = `/api/oauth/${provider}${qs}`;
@@ -222,16 +462,18 @@ export default function Login() {
   return (
     <>
       <style>{`
-        @keyframes login-float { 0%,100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(30px,-40px,0) scale(1.12); } }
-        @keyframes login-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes login-shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-6px); } 40%,80% { transform: translateX(6px); } }
-        .login-orb { animation: login-float 14s ease-in-out infinite; }
-        .login-orb-delay { animation-delay: -5s; }
-        .login-orb-delay-2 { animation-delay: -9s; }
-        .login-rise { animation: login-rise .5s ease-out both; }
-        .login-shake { animation: login-shake .4s ease-in-out; }
+        @keyframes gs-float { 0%,100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(30px,-40px,0) scale(1.12); } }
+        @keyframes gs-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes gs-shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-6px); } 40%,80% { transform: translateX(6px); } }
+        @keyframes gs-blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+        .gs-orb { animation: gs-float 14s ease-in-out infinite; }
+        .gs-orb-delay { animation-delay: -5s; }
+        .gs-orb-delay-2 { animation-delay: -9s; }
+        .gs-rise { animation: gs-rise .5s ease-out both; }
+        .gs-shake { animation: gs-shake .4s ease-in-out; }
+        .gs-blink { animation: gs-blink 1.1s step-end infinite; }
         @media (prefers-reduced-motion: reduce) {
-          .login-orb, .login-rise, .login-shake { animation: none; }
+          .gs-orb, .gs-rise, .gs-shake, .gs-blink { animation: none; }
         }
       `}</style>
 
@@ -239,13 +481,13 @@ export default function Login() {
         <BrandPanel />
 
         <main className="relative flex items-center justify-center bg-background p-6 sm:p-10">
-          <div className="login-rise w-full max-w-sm space-y-7">
+          <div className="gs-rise w-full max-w-sm space-y-7">
             {/* Mobile brand */}
             <div className="flex items-center justify-center gap-2 text-lg font-semibold tracking-tight lg:hidden">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-background">
-                <Sparkles className="h-4 w-4" />
-              </div>
-              {APP_NAME}
+              <RadarLogo size={22} />
+              <span className="font-display uppercase tracking-[0.26em]">
+                Grid<span className="text-primary">Scout</span>
+              </span>
             </div>
 
             <div className="space-y-2 text-center lg:text-left">
@@ -253,19 +495,21 @@ export default function Login() {
                 {isSignup ? "Create your account" : "Welcome back"}
               </h1>
               <p className="text-sm text-muted-foreground">
-                {isSignup ? "Start in seconds. No credit card required." : "Sign in to pick up right where you left off."}
+                {isSignup
+                  ? "Start with one free lead credit. No credit card required."
+                  : "Your sectors are waiting. Pick up where you left off."}
               </p>
             </div>
 
             <ModeTabs mode={mode} onChange={switchMode} disabled={isLoading} />
 
-            {/* Error banner */}
+            {/* Error banner — key remount re-triggers the shake on new errors */}
             <div aria-live="assertive" className="empty:hidden">
               {error && (
                 <div
                   key={error}
                   role="alert"
-                  className="login-shake flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+                  className="gs-shake flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
                 >
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{error}</span>
@@ -273,20 +517,7 @@ export default function Login() {
               )}
             </div>
 
-            {/* OAuth */}
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" type="button" className="gap-2" onClick={() => oauth("google")} disabled={isLoading}>
-                  <GoogleIcon /> Google
-                </Button>
-                <Button variant="outline" type="button" className="gap-2" onClick={() => oauth("github")} disabled={isLoading}>
-                  <GithubIcon /> GitHub
-                </Button>
-              </div>
-              <Button variant="outline" type="button" className="w-full gap-2" onClick={() => oauth("apple")} disabled={isLoading}>
-                <AppleIcon /> Continue with Apple
-              </Button>
-            </div>
+            <OAuthButtons onProvider={oauth} disabled={isLoading} />
 
             <div className="relative">
               <Separator />
@@ -296,9 +527,9 @@ export default function Login() {
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-4" noValidate={false}>
+            <form onSubmit={handleSubmit} className="space-y-4">
               {isSignup && (
-                <div className="login-rise space-y-2">
+                <div className="gs-rise space-y-2">
                   <Label htmlFor="name">Name</Label>
                   <Input
                     id="name"
@@ -329,83 +560,21 @@ export default function Login() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
-                  {!isSignup && (
-                    <button
-                      type="button"
-                      className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                      onClick={() => navigate("/forgot-password")}
-                    >
-                      Forgot password?
-                    </button>
-                  )}
-                </div>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    name="password"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    onKeyUp={(e) => setCapsLock(e.getModifierState("CapsLock"))}
-                    onBlur={() => setCapsLock(false)}
-                    placeholder="••••••••"
-                    autoComplete={isSignup ? "new-password" : "current-password"}
-                    minLength={8}
-                    required
-                    disabled={isLoading}
-                    className="pr-10"
-                    aria-describedby="password-help"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    disabled={isLoading}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-
-                <div id="password-help" className="space-y-2">
-                  {capsLock && (
-                    <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                      <AlertCircle className="h-3.5 w-3.5" /> Caps Lock is on
-                    </p>
-                  )}
-
-                  {isSignup && (
-                    <div className="space-y-1.5">
-                      <div className="flex gap-1" aria-hidden>
-                        {[1, 2, 3, 4].map((i) => (
-                          <div
-                            key={i}
-                            className={`h-1 flex-1 rounded-full transition-colors duration-300 ${
-                              strength.level >= i ? strength.color : "bg-muted"
-                            }`}
-                          />
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          {password.length >= 8 && <Check className="h-3 w-3 text-emerald-500" />}
-                          At least 8 characters
-                        </span>
-                        {strength.label && <span aria-live="polite">{strength.label}</span>}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <PasswordField
+                value={password}
+                onChange={setPassword}
+                show={showPassword}
+                onToggleShow={() => setShowPassword((v) => !v)}
+                isSignup={isSignup}
+                disabled={isLoading}
+                onForgotPassword={() => navigate("/forgot-password")}
+              />
 
               <Button type="submit" size="lg" className="group w-full" disabled={isLoading}>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {isSignup ? "Creating account…" : "Signing in…"}
+                    Establishing uplink…
                   </>
                 ) : (
                   <>
@@ -425,7 +594,7 @@ export default function Login() {
                 </>
               ) : (
                 <>
-                  Protected by industry-standard encryption.{" "}
+                  Signals encrypted end to end.{" "}
                   <a href="/privacy" className="underline underline-offset-2 hover:text-foreground">Privacy</a>
                 </>
               )}

@@ -110,10 +110,10 @@ function observations(a: PitchInput): string[] {
     if (a.mobileOk === false) found.push({ w: 6, t: "Their website is not mobile-friendly." });
     if (a.metaOk === false) found.push({ w: 4, t: "Their website is missing basic search metadata (titles and descriptions)." });
   }
-  if (a.reviewCount > 0 && !a.respondsToReviews) {
-    found.push({ w: 5, t: `Has ${a.reviewCount} Google reviews but does not reply to them.` });
+  if ((a.reviewCount ?? 0) > 0 && !a.respondsToReviews) {
+    found.push({ w: 5, t: `Has ${(a.reviewCount ?? 0)} Google reviews but does not reply to them.` });
   }
-  if (a.photos < 5) found.push({ w: 5, t: `Profile has only ${a.photos} photo${a.photos === 1 ? "" : "s"}.` });
+  if ((a.photos ?? 0) < 5) found.push({ w: 5, t: `Profile has only ${(a.photos ?? 0)} photo${(a.photos ?? 0) === 1 ? "" : "s"}.` });
   if (a.posts === 0) found.push({ w: 4, t: "No Google Business posts." });
 
   const picked = found.sort((x, y) => y.w - x.w).slice(0, 3).map((f) => f.t);
@@ -134,8 +134,8 @@ Business: ${oneLine(a.name, 80)}
 Type: ${meta.label}
 Area: ${oneLine(a.area, 40)}, Kenya
 Google visibility score: ${a.scores.visibility}/100
-Rating: ${a.rating.toFixed(1)} from ${a.reviewCount} Google reviews
-Estimated local searches for "${meta.keyword}": about ${a.estSearches.toLocaleString("en-KE")} per month (estimate)
+Rating: ${(a.rating ?? 0).toFixed(1)} from ${(a.reviewCount ?? 0)} Google reviews
+Estimated local searches for "${meta.keyword}": about ${(a.estSearches ?? 0).toLocaleString("en-KE")} per month (estimate)
 Estimated monthly revenue lost to weak visibility: about ${compactKes(a.lostRevenueKes)} (modelled estimate, not a measured figure)
 Verified observations:
 ${facts.length ? facts.map((f) => `- ${f}`).join("\n") : "- No major gaps found; offer a competitor benchmark instead."}

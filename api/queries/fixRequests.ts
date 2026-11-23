@@ -1,3 +1,4 @@
+
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import {
@@ -13,24 +14,20 @@ import {
   type FixPackageId,
 } from "../../contracts/grid";
 import {
-  FIX_REQUEST_CREDITS,
   FIX_NOTE_MAX,
   canTransitionFix,
   selectFromPlan,
-  fixRequestRefundCredits,
   type FixRequestStatus,
 } from "../../contracts/fixes";
 
-// Re-usable select shape that joins the business into the lead
 const leadWithBusiness = {
   lead: leads,
   business: businesses,
 };
 
 /**
- * Agency submits a new fix request for a lead they own.
- * Deducts credits, computes the plan, validates the selected packages,
- * and inserts the request.
+ * Customer submits a free Service Desk request for a lead they own.
+ * GRIDSCOUT reviews the request and sends a quotation separately.
  */
 export async function submitFixRequest(
   userId: number,
@@ -38,46 +35,57 @@ export async function submitFixRequest(
 ) {
   const db = getDb();
 
-  return await db.transaction(async (tx) => {
-    // 1. Find the lead (must be owned by this user)
+  return db.transaction(async (tx) => {
+    // Verify lead ownership.
     const rows = await tx
       .select(leadWithBusiness)
       .from(leads)
       .innerJoin(businesses, eq(leads.businessId, businesses.id))
-      .where(and(eq(leads.id, input.leadId), eq(leads.userId, userId)))
+      .where(
+        and(
+          eq(leads.id, input.leadId),
+          eq(leads.userId, userId),
+        ),
+      )
       .limit(1);
 
     const row = rows[0];
     if (!row) throw new Error("LEAD_NOT_FOUND");
 
-    // 2. Compute the full plan based on the business's signals
+    // Rebuild the available fix plan on the server.
     const plan = buildFixPlan(row.business);
     if (plan.length === 0) throw new Error("NOTHING_TO_FIX");
 
-    // 3. Filter the requested packages to only those in the plan
+    // Accept only packages supported by the actual plan.
     const selected =
-      input.packages.length > 0 ? selectFromPlan(input.packages, plan) : plan;
-    if (selected.length === 0) throw new Error("NO_VALID_PACKAGES");
+      input.packages.length > 0
+        ? selectFromPlan(input.packages, plan)
+        : plan;
 
-    // 4. Charge the credit fee
-    const walletRows = await tx
-      .select()
-      .from(wallets)
-      .where(eq(wallets.userId, userId))
-      .limit(1);
-
-    const wallet = walletRows[0];
-    if (!wallet || wallet.credits < FIX_REQUEST_CREDITS) {
-      throw new Error("INSUFFICIENT_CREDITS");
+    if (selected.length === 0) {
+      throw new Error("NO_VALID_PACKAGES");
     }
 
-    await tx
-      .update(wallets)
-      .set({ credits: sql`${wallets.credits} - ${FIX_REQUEST_CREDITS}` })
-      .where(eq(wallets.userId, userId));
+    // Prevent duplicate open requests.
+    const existing = await tx
+      .select({ id: fixRequests.id })
+      .from(fixRequests)
+      .where(
+        and(
+          eq(fixRequests.userId, userId),
+          eq(fixRequests.leadId, input.leadId),
+          sql`${fixRequests.status} IN ('new', 'quoted', 'in_progress')`,
+        ),
+      )
+      .limit(1);
 
-    // 5. Insert the request
+    if (existing.length > 0) {
+      throw new Error("REQUEST_ALREADY_OPEN");
+    }
+
     const note = input.note?.trim().slice(0, FIX_NOTE_MAX) || null;
+
+    // Free submission: no wallet or credit transaction.
     const [{ id: requestId }] = await tx
       .insert(fixRequests)
       .values({
@@ -85,31 +93,26 @@ export async function submitFixRequest(
         userId,
         packages: selected,
         totalKes: fixPlanTotalKes(selected),
-        feeCredits: FIX_REQUEST_CREDITS,
+        feeCredits: 0,
         note,
         status: "new",
       })
       .$returningId();
 
-    // 6. Log the credit transaction
-    await tx.insert(creditTxns).values({
-      userId,
-      kind: "fix_request",
-      credits: -FIX_REQUEST_CREDITS,
-      amountKes: 0,
-      status: "completed",
-    });
-
-    return { id: requestId, status: "new" as const, packages: selected };
+    return {
+      id: requestId,
+      status: "new" as const,
+      packages: selected,
+      feeCredits: 0,
+    };
   });
 }
 
-/**
- * Agency: list their own requests and statuses.
- */
+/** Customer: list their own requests. */
 export async function listMyFixRequests(userId: number) {
   const db = getDb();
-  const rows = await db
+
+  return db
     .select({
       id: fixRequests.id,
       leadId: fixRequests.leadId,
@@ -131,19 +134,14 @@ export async function listMyFixRequests(userId: number) {
     .innerJoin(businesses, eq(leads.businessId, businesses.id))
     .where(eq(fixRequests.userId, userId))
     .orderBy(desc(fixRequests.createdAt));
-
-  return rows;
 }
 
-/**
- * Admin: the desk. Lists all requests, optionally filtered by status.
- */
+/** Admin: list all Service Desk requests. */
 export async function adminListFixRequests(
   statuses?: readonly FixRequestStatus[],
 ) {
   const db = getDb();
-  
-  // Build base query
+
   const baseQuery = db
     .select({
       id: fixRequests.id,
@@ -166,19 +164,22 @@ export async function adminListFixRequests(
     .innerJoin(leads, eq(fixRequests.leadId, leads.id))
     .innerJoin(businesses, eq(leads.businessId, businesses.id));
 
-  // Apply status filter if provided
-  const query = statuses && statuses.length > 0
-    ? baseQuery.where(
-        sql`${fixRequests.status} IN (${sql.join(statuses.map(s => sql`${s}`), sql`, `)})`
-      )
-    : baseQuery;
+  const query =
+    statuses && statuses.length > 0
+      ? baseQuery.where(
+          sql`${fixRequests.status} IN (${sql.join(
+            statuses.map((status) => sql`${status}`),
+            sql`, `,
+          )})`,
+        )
+      : baseQuery;
 
   return query.orderBy(desc(fixRequests.createdAt));
 }
 
 /**
- * Admin: update a request's status, quote, or admin note.
- * Handles refunds if the request is declined.
+ * Admin: update request status, quotation, or internal note.
+ * Historical paid requests retain their original refund behaviour.
  */
 export async function adminUpdateFixRequest(input: {
   id: number;
@@ -188,8 +189,7 @@ export async function adminUpdateFixRequest(input: {
 }) {
   const db = getDb();
 
-  return await db.transaction(async (tx) => {
-    // 1. Find the request
+  return db.transaction(async (tx) => {
     const rows = await tx
       .select()
       .from(fixRequests)
@@ -199,35 +199,64 @@ export async function adminUpdateFixRequest(input: {
     const request = rows[0];
     if (!request) throw new Error("REQUEST_NOT_FOUND");
 
-    // 2. If changing status, validate the transition
-    if (input.status && input.status !== request.status) {
-      if (!canTransitionFix(request.status, input.status)) {
-        throw new Error("INVALID_TRANSITION");
-      }
+    // Validate any supplied quotation.
+    if (
+      input.quotedKes !== undefined &&
+      (!Number.isFinite(input.quotedKes) || input.quotedKes < 0)
+    ) {
+      throw new Error("INVALID_QUOTE");
     }
 
-    // 3. Refund credits if declined
-    const refund = input.status ? fixRequestRefundCredits(input.status) : 0;
-    if (refund > 0) {
+    // A quoted request must have a quotation.
+    if (
+      input.status === "quoted" &&
+      (input.quotedKes ?? request.quotedKes) == null
+    ) {
+      throw new Error("QUOTE_REQUIRED");
+    }
+
+    const isStatusChange =
+      input.status !== undefined &&
+      input.status !== request.status;
+
+    if (
+      isStatusChange &&
+      !canTransitionFix(request.status, input.status!)
+    ) {
+      throw new Error("INVALID_TRANSITION");
+    }
+
+    // Refund only historical requests that actually paid credits.
+    const shouldRefund =
+      isStatusChange &&
+      input.status === "declined" &&
+      request.feeCredits > 0;
+
+    if (shouldRefund) {
+      const refundCredits = request.feeCredits;
+
       await tx
         .update(wallets)
-        .set({ credits: sql`${wallets.credits} + ${refund}` })
+        .set({
+          credits: sql`${wallets.credits} + ${refundCredits}`,
+        })
         .where(eq(wallets.userId, request.userId));
 
       await tx.insert(creditTxns).values({
         userId: request.userId,
         kind: "refund",
-        credits: refund,
+        credits: refundCredits,
         amountKes: 0,
         status: "completed",
       });
     }
 
-    // 4. Update the request
     await tx
       .update(fixRequests)
       .set({
-        ...(input.status ? { status: input.status } : {}),
+        ...(input.status !== undefined
+          ? { status: input.status }
+          : {}),
         ...(input.quotedKes !== undefined
           ? { quotedKes: input.quotedKes }
           : {}),
@@ -237,6 +266,9 @@ export async function adminUpdateFixRequest(input: {
       })
       .where(eq(fixRequests.id, input.id));
 
-    return { ok: true };
+    return {
+      ok: true,
+      id: input.id,
+    };
   });
 }

@@ -13,18 +13,30 @@ import { Ticker } from "./Ticker";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors ${
-    isActive ? "bg-secondary text-primary" : "text-muted-foreground hover:text-foreground"
+    isActive
+      ? "bg-secondary text-primary"
+      : "text-muted-foreground hover:text-foreground"
   }`;
 
-export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
+export function ConsoleHeader({
+  onBuyCredits,
+}: {
+  onBuyCredits?: () => void;
+}) {
   const { user, logout } = useAuth();
+  const isAdmin = user?.role === "admin";
+
+  // Admins never need a wallet, so don't even fetch it for them.
   const { data: wallet } = trpc.payments.wallet.useQuery(undefined, {
     retry: false,
+    enabled: !!user && !isAdmin,
   });
 
-  const unlimited = wallet?.unlimited === true || user?.role === "admin";
+  const unlimited = isAdmin || wallet?.unlimited === true;
   const credits = wallet?.credits ?? 0;
-  const initials = (user?.name ?? user?.email ?? "GS").slice(0, 2).toUpperCase();
+  const initials = (user?.name ?? user?.email ?? "GS")
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
     <div className="sticky top-0 z-[600]">
@@ -38,46 +50,54 @@ export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
 
         <div className="hidden items-center gap-2 md:flex">
           <span className="led" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-scout-mint">Live grid</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-scout-mint">
+            Live grid
+          </span>
         </div>
 
-  <nav className="ml-6 hidden items-center gap-1 lg:flex">
-  <NavLink to="/app" className={navLinkClass}>
-    Console
-  </NavLink>
-  <NavLink to="/leads" className={navLinkClass}>
-    Pipeline
-  </NavLink>
+        <nav className="ml-6 hidden items-center gap-1 lg:flex">
+          <NavLink to="/app" className={navLinkClass}>
+            Console
+          </NavLink>
+          <NavLink to="/leads" className={navLinkClass}>
+            Pipeline
+          </NavLink>
 
-  {user?.role === "admin" && (
-    <>
-      <span className="mx-1 h-4 w-px bg-border" />
-      <NavLink to="/admin/fixes" className={navLinkClass}>
-        Service Desk
-      </NavLink>
-      <NavLink to="/admin/osm" className={navLinkClass}>
-        OSM Preview
-      </NavLink>
-    </>
-  )}
-</nav>
+          {isAdmin && (
+            <>
+              <span className="mx-1 h-4 w-px bg-border" />
+              <NavLink to="/admin/fixes" className={navLinkClass}>
+                Service Desk
+              </NavLink>
+              <NavLink to="/admin/osm" className={navLinkClass}>
+                OSM Preview
+              </NavLink>
+            </>
+          )}
+        </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          {unlimited ? (
-            // Admins never get a buy affordance. This is a static badge — not a button,
-            // no hover, no cursor-pointer, no onClick. It confirms unlimited status
-            // without suggesting you can "top up".
+          {!user ? (
+            // Auth still resolving: show a neutral placeholder so an admin
+            // never sees a flash of "0 credits / buy" before the role loads.
             <div
-              title="Admin account — credits are unlimited"
+              aria-hidden="true"
+              className="h-7 w-28 animate-pulse border border-border bg-secondary/50"
+            />
+          ) : unlimited ? (
+            // Static badge: no button, no onClick, no way to "top up".
+            <div
+              title="Admin account: credits are unlimited"
               className="flex items-center gap-2 border border-scout-mint/40 bg-scout-mint/10 px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-scout-mint"
             >
               <span className="inline-block h-2 w-2 rotate-45 bg-scout-mint" />
-              ∞ credits · admin
+              ∞ credits{isAdmin ? " · admin" : ""}
             </div>
           ) : (
             <button
               onClick={onBuyCredits}
-              className="flex cursor-pointer items-center gap-2 border border-primary/40 bg-primary/10 px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-primary transition-colors hover:bg-primary/20"
+              disabled={!onBuyCredits}
+              className="flex cursor-pointer items-center gap-2 border border-primary/40 bg-primary/10 px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-primary transition-colors hover:bg-primary/20 disabled:cursor-default"
             >
               <span className="inline-block h-2 w-2 rotate-45 bg-primary" />
               {credits} credits
@@ -93,15 +113,21 @@ export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
                 </AvatarFallback>
               </Avatar>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="border-border bg-card font-mono text-xs">
+
+            <DropdownMenuContent
+              align="end"
+              className="border-border bg-card font-mono text-xs"
+            >
               <div className="hairline-b px-3 py-2 text-[10px] uppercase tracking-widest text-muted-foreground">
                 {user?.email ?? "operator"}
               </div>
+
               {unlimited && (
-                <div className="px-3 pb-2 font-mono text-[10px] uppercase tracking-widest text-scout-mint">
-                  admin · unlimited credits
+                <div className="px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-scout-mint">
+                  {isAdmin ? "admin · unlimited credits" : "unlimited credits"}
                 </div>
               )}
+
               <DropdownMenuItem
                 onClick={logout}
                 className="cursor-pointer text-scout-red focus:bg-secondary focus:text-scout-red"
@@ -112,6 +138,7 @@ export function ConsoleHeader({ onBuyCredits }: { onBuyCredits: () => void }) {
           </DropdownMenu>
         </div>
       </header>
+
       <Ticker />
     </div>
   );
